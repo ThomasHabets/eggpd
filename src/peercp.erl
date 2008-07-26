@@ -2,8 +2,6 @@
 %%% File    : peercp.erl
 %%% Author  : Thomas Habets <thomas@habets.pp.se>
 %%% Description :
-%%%  c(peercp).
-%%%  peercp:test().
 %%%
 %%% Created :  26 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
 %%%-------------------------------------------------------------------

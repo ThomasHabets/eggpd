@@ -2,6 +2,7 @@
 %%% File    : peerp.erl
 %%% Author  : Thomas Habets <thomas@habets.pp.se>
 %%% Description : 
+%%%   Test with peerp:test().
 %%%
 %%% Created :  24 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
 %%%-------------------------------------------------------------------
