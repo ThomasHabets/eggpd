@@ -204,21 +204,32 @@ parse_update(Msg) ->
 %%
 %%
 %%
-parse_msg(Msg) ->
+parse_all_msgs(_Peerp, <<>>) ->
+    ok;
+
+parse_all_msgs(Peerp, Msg) ->
     ?BGP_HEADER_FMT = Msg,
-    case _BGP_Head_Type of
-	?BGP_TYPE_OPEN ->
-	    {open, parse_open(Msg)};
-	?BGP_TYPE_KEEPALIVE ->
-	    keepalive;
-	?BGP_TYPE_UPDATE ->
-	    parse_update(Msg);
-	?BGP_TYPE_NOTIFICATION ->
-	    {notification, Msg};
-	Other ->
-	    warning('PEERCP', ["Unknown BGP message type: ~p", Other]),
-	    {unknown, Other}
-    end.
+    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
+    parse_msg(Peerp, Msg1),
+    parse_all_msgs(Peerp, Msg2).
+
+parse_msg(Peerp, Msg) ->
+    ?BGP_HEADER_FMT = Msg,
+    Peerp ! {self(), case _BGP_Head_Type of
+			 ?BGP_TYPE_OPEN ->
+			     {open, parse_open(Msg)};
+			 ?BGP_TYPE_KEEPALIVE ->
+			     keepalive;
+			 ?BGP_TYPE_UPDATE ->
+			     parse_update(Msg);
+			 ?BGP_TYPE_NOTIFICATION ->
+			     {notification, Msg};
+			 Other ->
+			     warning('PEERCP',
+				     ["Unknown BGP message type: ~p",
+				      Other]),
+			     {error, Other}
+		     end}.
     
 %%
 %%
@@ -248,7 +259,7 @@ do_announce_route(_Sock, Path, [R|Routes]) ->
     do_announce_route(_Sock, Path, Routes);
 
 do_announce_route(Sock, Path, Route) ->
-    io:format("Route: ~p ~p~n", [Path, Route]),
+    %%io:format("Route: ~p ~p~n", [Path, Route]),
 
     %% Info
     {Net,Plen} = Route,
@@ -384,11 +395,11 @@ state_connected(Sock, Peerp, Peer) ->
 
 	%% From socket
 	{tcp, Sock, Msg} ->
-	    Peerp ! {self(), parse_msg(Msg)},
+	    parse_all_msgs(Peerp, Msg),
 	    state_connected(Sock, Peerp, Peer);
 
 	{tcp_closed, Sock} ->
-	    Peerp ! {self(), {error, tcp_closed, Sock}},
+	    Peerp ! {self(), {error, {tcp_closed, Sock}}},
 	    gen_tcp:close(Sock),
 	    state_idle(Peerp, Peer);
 	    

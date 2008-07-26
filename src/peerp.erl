@@ -51,7 +51,7 @@ start(RibP, Peer) ->
 %% States
 %%
 state_reset(Parent, Peercp, Peer) ->
-    peercp:stop(self(), Peer),
+    peercp:stop(Peercp),
     state_reset_wait(Parent, Peercp, Peer).
 
 state_reset_wait(Parent, Peercp, Peer) ->
@@ -122,6 +122,10 @@ state_established(Parent, Peercp, Peer) ->
 	    state_established(Parent, Peercp, Peer);
 	{Peercp, keepalive} ->
 	    state_established(Parent, Peercp, Peer);
+	{Peercp, {error, Err}} ->
+	    io:format("Peerp> state_established: error from peercp ~p~n",
+		      [Err]),
+	    state_reset(Parent, Peercp, Peer);
 	Any ->
 	    io:format("Peerp> state_established: unexpected ~p~n", [Any])
     after 3000 ->
@@ -129,15 +133,25 @@ state_established(Parent, Peercp, Peer) ->
 	    state_established(Parent, Peercp, Peer)
     end.
 
-flood_routes(_Parent, Peercp, _Peer) ->
-    Route = [{16#0A121200, 24}],
+
+flood_routes(Parent, Peercp, Peer) ->
+    flood_routes(Parent, Peercp, Peer, 10).
+
+flood_routes(_Parent, _Peercp, _Peer, 0) ->
+    ok;
+flood_routes(_Parent, Peercp, _Peer, N) ->
+    Route = [{16#0A121200 + N, 32}],
     Path = [{origin,igp},
 	    {as_path,{as_sequence,[65455, 65455, 1257]}},
 	    {next_hop,3232246411},
 	    {multi_exit_disc,0}],
-    peercp:announce_route(Peercp, Path, Route).
+    peercp:announce_route(Peercp, Path, Route),
+    flood_routes(_Parent, Peercp, _Peer, N - 1).
 
 test() ->
-    Peer = #peer{ip="192.168.42.206",
-		 as=65021},
+    _Peer1 = #peer{ip="192.168.42.206",
+    		 as=65021},
+    _Peer2 = #peer{ip="192.168.42.118",
+		 as=65501},
+    Peer = _Peer2,
     state_new(self(), Peer).
