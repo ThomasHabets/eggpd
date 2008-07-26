@@ -11,9 +11,11 @@
 	  port = 179,
 	  as}).
 
-%-record(bgp_update, {
-%	  
-%	 })
+-record(route, {
+	  net,
+	  prefixlen,
+	  nexthop
+	  }).
 
 -define(BGP_MARKER, 16#ffffffff).
 -define(BGP_TYPE_OPEN, 1).
@@ -69,13 +71,15 @@
 			 ?BGP_TYPE_UPDATE:8,
 			 _BGP_Update_Withdrawlen:16,
 			 _BGP_Update_Rest_Withdraw/binary>>).
--define(BGP_UPDATE_FMT_WITHDRAW, <<
-				  _BGP_Update_Withdraw:_BGP_Update_Withdrawlen/binary,
-				  _BGP_Update_Pathattrlen:16,
-				  _BGP_Update_Rest_Pathattr/binary>>).
--define(BGP_UPDATE_FMT_PATHATTR, <<
-				  _BGP_Update_Pathattr:_BGP_Update_Pathattrlen/binary,
-				  _BGP_Update_Info/binary>>).
+-define(BGP_UPDATE_FMT_WITHDRAW,
+	<<
+	 _BGP_Update_Withdraw:_BGP_Update_Withdrawlen/binary,
+	 _BGP_Update_Pathattrlen:16,
+	 _BGP_Update_Rest_Pathattr/binary>>).
+-define(BGP_UPDATE_FMT_PATHATTR,
+	<<
+	 _BGP_Update_Pathattr:_BGP_Update_Pathattrlen/binary,
+	 _BGP_Update_Info/binary>>).
  
 %% Update - Path attributes
 -define(BGP_PATHATTR_ORIGIN, 1).
@@ -85,4 +89,11 @@
 -define(BGP_PATHATTR_LOCAL_PREF, 5).
 -define(BGP_PATHATTR_ATOMIC_AGGREGATE, 6).
 -define(BGP_PATHATTR_AGGREGATOR, 7).
+
+-define(BGP_PATHATTR_FLAG_OPTIONAL, 128).
+-define(BGP_PATHATTR_FLAG_TRANSITIVE, 64).
+
+-define(BGP_PATHATTR_AS_PATH_SET, 1).
+-define(BGP_PATHATTR_AS_PATH_SEQUENTIAL, 2).
+
 

@@ -87,7 +87,7 @@ state_connect(Parent, Peercp, Peer) ->
 	    peercp:send_open(Peercp),
 	    state_opensent(Parent, Peercp, Peer);
 	Any ->
-	    io:format("Peerp> state_connected: unexpected ~p~n", [Any]),
+	    io:format("Peerp> state_connect: unexpected ~p~n", [Any]),
 	    state_reset(Parent, Peercp, Peer)
     end.
 
@@ -107,6 +107,7 @@ state_openconfirm(Parent, Peercp, Peer) ->
 	{Peercp, {ack, _}} ->                      % Ignore these
 	    state_openconfirm(Parent, Peercp, Peer);	    
 	{Peercp, keepalive} ->
+	    flood_routes(Parent, Peercp, Peer),
 	    state_established(Parent, Peercp, Peer);
 	Any ->
 	    io:format("Peerp> state_openconfirm: unexpected ~p~n", [Any])
@@ -117,7 +118,7 @@ state_established(Parent, Peercp, Peer) ->
 	{Peercp, {ack, _}} ->                      % Ignore these
 	    state_established(Parent, Peercp, Peer);	    
 	{Peercp, {update, Msg}} ->
-	    io:format("Peerp> Update ~p!!~n", [Msg]),
+	    io:format("Peerp> Got Update ~p!!~n", [Msg]),
 	    state_established(Parent, Peercp, Peer);
 	{Peercp, keepalive} ->
 	    state_established(Parent, Peercp, Peer);
@@ -127,7 +128,15 @@ state_established(Parent, Peercp, Peer) ->
 	    peercp:send_keepalive(Peercp),
 	    state_established(Parent, Peercp, Peer)
     end.
-    
+
+flood_routes(_Parent, Peercp, _Peer) ->
+    Route = [{16#0A121200, 24}],
+    Path = [{origin,igp},
+	    {as_path,{as_sequence,[65455, 65455, 1257]}},
+	    {next_hop,3232246411},
+	    {multi_exit_disc,0}],
+    peercp:announce_route(Peercp, Path, Route).
+
 test() ->
     Peer = #peer{ip="192.168.42.206",
 		 as=65021},

@@ -16,7 +16,8 @@
 	 stop/1,
 	 connect/1,
 	 send_open/1,
-	 send_keepalive/1
+	 send_keepalive/1,
+	 announce_route/3
 	 ]).
 
 %% Internal
@@ -122,7 +123,7 @@ parse_update_pathattr_aggregator(Bin) ->
 parse_update_pathattr(<<>>) ->
     [];
 parse_update_pathattr(Pathattr) ->
-    %%debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
+    debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
      _F_Transitive:1,
      _F_Partial:1,
@@ -240,7 +241,97 @@ do_send_open(Sock, _Peer) ->
     gen_tcp:send(Sock, Head),
     {ack, 'Sent open'}.
     
+do_announce_route(_Sock, _Path, []) ->
+    {ack, announced};
+do_announce_route(_Sock, Path, [R|Routes]) ->
+    do_announce_route(_Sock, Path, R),
+    do_announce_route(_Sock, Path, Routes);
 
+do_announce_route(Sock, Path, Route) ->
+    io:format("Route: ~p ~p~n", [Path, Route]),
+
+    %% Info
+    {Net,Plen} = Route,
+    Tlen = Plen,
+    %%io:format("~p ~p ~n", [Net, Plen]),
+    TNet = Net bsr (32-Plen),
+    _BGP_Update_Info = <<Plen:8,TNet:Tlen>>,
+    %%io:format("Info: ~p~n", [_BGP_Update_Info]),
+
+    %% Path attributes
+    _BGP_Update_Pathattr = pathattr_factory(Path),
+    _BGP_Update_Pathattrlen = size(_BGP_Update_Pathattr),
+    %%io:format("Pathattr: ~p~n", [_BGP_Update_Pathattr]),
+    _BGP_Update_Rest_Pathattr = ?BGP_UPDATE_FMT_PATHATTR,
+
+    %% Withdraw
+    _BGP_Update_Withdraw = <<>>,
+    _BGP_Update_Withdrawlen = 0,
+    _BGP_Update_Rest_Withdraw = ?BGP_UPDATE_FMT_WITHDRAW,
+
+    %% Header
+    _BGP_Length = 21 + 0
+	+ 2 + _BGP_Update_Pathattrlen
+	+ size(_BGP_Update_Info),
+    Update = ?BGP_UPDATE_FMT,
+    %%io:format("Packet: ~p~n", [Update]),
+    gen_tcp:send(Sock, Update),
+    {ack, {announce, Route}}.
+
+array_to_binary(_Size, []) ->
+    <<>>;
+array_to_binary(Size, [H|T]) ->
+    R = array_to_binary(Size, T),
+    <<H:Size, R/binary>>.
+pathattr_factory([]) ->
+    <<>>;
+pathattr_factory([{K,V}|Pathattrs]) ->
+    Bin = case K of
+	      origin ->
+		  T = case V of
+			  igp ->  0;
+			  egp ->  1;
+			  incomplete -> 2
+		      end,
+		  <<
+		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+		   ?BGP_PATHATTR_ORIGIN:8,
+		   1:8,                                % len
+		   T:8>>;
+	      as_path ->
+		  {ASType1, ASP} = V,
+		  ASType2 = case ASType1 of
+				as_sequence -> 
+				    ?BGP_PATHATTR_AS_PATH_SEQUENTIAL;
+				as_set -> 
+				    ?BGP_PATHATTR_AS_PATH_SET
+			    end,
+		  L = length(ASP),
+		  TotL = 2 + L * 2,
+		  R = array_to_binary(16, ASP),
+		  <<
+		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+		   ?BGP_PATHATTR_AS_PATH:8,
+		   TotL:8,                             % attr len
+		   ASType2:8,
+		   L:8,                                % Path lenght
+		   R/binary>>;
+	      next_hop ->
+		  <<
+		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+		   ?BGP_PATHATTR_NEXT_HOP:8,
+		   4:8,                                % addrlen
+		   V:32>>;
+	      multi_exit_disc ->
+		  <<
+		   ?BGP_PATHATTR_FLAG_OPTIONAL:8,
+		   ?BGP_PATHATTR_MULTI_EXIT_DISC:8,
+		   4:8,                                % Val len
+		   V:32>>
+		      end,
+    Rest = pathattr_factory(Pathattrs),
+    <<Bin/binary, Rest/binary>>.
+		  
 %%
 %% API
 %%
@@ -252,6 +343,8 @@ send_open(Peercp) ->
     Peercp ! {self(), open}.
 send_keepalive(Peercp) ->
     Peercp ! {self(), keepalive}.
+announce_route(Peercp, Path, Route) ->
+    Peercp ! {self(), {announce, Path, Route}}.
 
 %%
 %%
@@ -281,8 +374,8 @@ state_connected(Sock, Peerp, Peer) ->
 	    Peerp ! {self(), do_send_keepalive(Sock)},
 	    state_connected(Sock, Peerp, Peer);
 
-	{Peerp, {announce, _Route}} ->
-	    Peerp ! {self(), {ack, announce}},
+	{Peerp, {announce, Path, Route}} ->
+	    Peerp ! {self(), do_announce_route(Sock, Path, Route)},
 	    state_connected(Sock, Peerp, Peer);
 
 	{Peerp, {withdraw, _Route}} ->
