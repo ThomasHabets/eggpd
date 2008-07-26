@@ -147,19 +147,169 @@ state_active(Sock, Peerp, Peer) ->
 %%
 %%
 %%
-state_parse_msg(Msg) ->
+parse_update_withdraw(<<>>) ->
+    [];
+parse_update_withdraw(Withdraw) ->
+    %debug('PEERCP', ["blaha: ~p", Withdraw]),
+    <<H:1, R1/binary>> = Withdraw,
+    Hb = H*8,
+    <<D:Hb, R2/binary>> = R1,
+    [D|parse_update_withdraw(R2)].
+
+%%
+%%
+%%
+parse_int_array(_Size, <<>>) ->
+    [];
+parse_int_array(Size, Bin) ->
+    <<D:Size, Rest/binary>> = Bin,
+    [D|parse_int_array(Size, Rest)].
+
+%%
+%%
+%%
+parse_update_pathattr_as_path(Val) ->
+    debug('PEERCP', ["parse_update_pathattr_as_path: ~p", Val]),
+    <<Type1:8, _Len:8, Rest/binary>> = Val,
+    Type2 = case Type1 of
+		   1 -> as_set;
+		   2 -> as_sequence
+	       end,
+    {as_path, {Type2,
+	       parse_int_array(16, Rest)}}.
+
+%%
+%%
+%%
+parse_update_pathattr_next_hop(Bin) ->
+    <<A:8,B:8,C:8,D:8>> = Bin,
+    {next_hop, (((256 * A + B) * 256 + C) * 256 + D)}.
+%%
+%%
+%%
+parse_update_pathattr_multi_exit_disc(Bin) ->
+    <<MED:32>> = Bin,
+    {multi_exit_disc, MED}.
+%%
+%%
+%%
+parse_update_pathattr_local_pref(Bin) ->
+    <<L:32>> = Bin,
+    {local_pref, L}.
+%%
+%%
+%%
+parse_update_pathattr_atomic_aggregate(_Bin) ->
+    atomic_aggregate.
+%%
+%%
+%%
+parse_update_pathattr_aggregator(Bin) ->
+    <<AS:16>> = Bin,
+    {aggregator, AS}.
+
+%%
+%%
+%%
+parse_update_pathattr(<<>>) ->
+    [];
+parse_update_pathattr(Pathattr) ->
+    debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
+    <<_F_Optional:1,
+     _F_Transitive:1,
+     _F_Partial:1,
+     _F_Extended:1,
+     _F_OtherFlags:4,
+     Code:8,
+     R1/binary>> = Pathattr,
+    case _F_Extended of
+	0 ->
+	    <<Len:8, R2/binary>> = R1;
+	1 ->
+	    <<Len:16, R2/binary>> = R1
+    end,
+    <<Value:Len/binary, R3/binary>> = R2,
+    Parsed = case Code of
+		 ?BGP_PATHATTR_ORIGIN -> 
+		     <<V:8>> = Value,
+		     {origin, case V of
+				  0 -> igp;
+				  1 -> egp;
+				  2 -> incomplete
+			      end};
+		 ?BGP_PATHATTR_AS_PATH ->
+		     parse_update_pathattr_as_path(Value);
+		 ?BGP_PATHATTR_NEXT_HOP -> 
+		     parse_update_pathattr_next_hop(Value);
+		 ?BGP_PATHATTR_MULTI_EXIT_DISC -> 
+		     parse_update_pathattr_multi_exit_disc(Value);
+		 ?BGP_PATHATTR_LOCAL_PREF -> 
+		     parse_update_pathattr_local_pref(Value);
+		 ?BGP_PATHATTR_ATOMIC_AGGREGATE -> 
+		     parse_update_pathattr_atomic_aggregate(Value);
+		 ?BGP_PATHATTR_AGGREGATOR -> 
+		     parse_update_pathattr_aggregator(Value);
+		 Any ->
+		     debug('PEERCP', ["Unknown path attribute ~p", Any])
+    end,
+    io:format("Parsed: ~p~n", [Parsed]),
+    [Parsed|parse_update_pathattr(R3)].
+
+
+%%
+%%
+%%
+parse_update_info(<<>>) ->
+    [];
+parse_update_info(Info) ->
+    %debug('PEERCP', ["Update Info parse: ~p", Info]),
+    <<Len:8, R1/binary>> = Info,
+    GLen = (8-(Len rem 8)) rem 8,
+    %debug('PEERCP', ["paaarse ~p ~p", Len, GLen]),
+    <<Prefix1:Len,
+     _Garbage:GLen,
+     R2/binary>> = R1,
+    Prefix2 = Prefix1 bsl (32-Len),
+    [{Prefix2, Len}|parse_update_info(R2)].
+
+%%
+%%
+%%
+parse_update(Msg) ->
+    ?BGP_UPDATE_FMT = Msg,
+
+    %% Get withdraws
+    ?BGP_UPDATE_FMT_WITHDRAW = _BGP_Update_Rest_Withdraw,
+
+    %% Get path attributes
+    ?BGP_UPDATE_FMT_PATHATTR = _BGP_Update_Rest_Pathattr,
+
+    %% Parse the three field infos
+    Withdraw = parse_update_withdraw(_BGP_Update_Withdraw),
+    Pathattr = parse_update_pathattr(_BGP_Update_Pathattr),
+    Info = parse_update_info(_BGP_Update_Info),
+
+    {update, {withdraw, Withdraw,
+	      pathattr, Pathattr,
+	      info, Info}}.
+
+%%
+%%
+%%
+parse_msg(Msg) ->
     ?BGP_HEADER_FMT = Msg,
     case _BGP_Head_Type of
 	?BGP_TYPE_OPEN ->
 	    {open, Msg};
 	?BGP_TYPE_KEEPALIVE ->
-	    {keepalive, Msg};
+	    {keepalive, normal};
 	?BGP_TYPE_UPDATE ->
-	    {update, Msg};
+	    parse_update(Msg);
 	?BGP_TYPE_NOTIFICATION ->
 	    {notification, Msg};
 	Other ->
-	    warning('PEERCP', ["Unknown BGP message type: ~p", Other])
+	    warning('PEERCP', ["Unknown BGP message type: ~p", Other]),
+	    {unknown, Other}
     end.
     
 %%
@@ -172,8 +322,11 @@ state_established(Sock, Peerp, Peer) ->
 	    From ! "Status: FIXME",
 	    ?MODULE:state_established(Sock, Peerp, Peer);
 	{tcp, Sock, Msg} ->
-	    Parsed = state_parse_msg(Msg),
-	    debug('PEERCP', ["Parsed message: ~p", Parsed]),
+	    io:format("11~n"),
+	    Parsed = parse_msg(Msg),
+	    io:format("12~n"),
+	    debug('PEERCP', ["Parsed message: ~w", Parsed]),
+	    io:format("13~n"),
 	    case Parsed of
 		{keepalive, _} ->
 		    {ok, normal};
