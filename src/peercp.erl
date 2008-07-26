@@ -9,16 +9,19 @@
 %%%-------------------------------------------------------------------
 -module(peercp).
 
+%%
+%% API
+%%
 -export([start/2,
-	 test/0,
-	 state_new/2,
-	 state_idle/2,
-	 state_idle/3,
-	 state_opensent/3,
-	 state_connect/2,
-	 state_active/3,
-	 state_established/3,
-	 state_openconfirm/3,
+	 stop/1,
+	 connect/1,
+	 send_open/1,
+	 send_keepalive/1
+	 ]).
+
+%% Internal
+-export([state_idle/2,
+	 state_connected/3,
 	 fmt/1]).
 
 -include("records.hrl").
@@ -27,51 +30,17 @@ fmt(X) ->
     [F|T] = X,
     lists:flatten(io_lib:format(F, T)).
 
-info(P, X) ->
-    io:format("~p> INFO ~p~n", [P,fmt(X)]).
-
 warning(P, X) ->
     io:format("~p> WARNING ~p~n", [P,fmt(X)]).
 
 debug(P, X) ->
     io:format("~p> DEBUG ~p ~n", [P,fmt(X)]).
 
-state_new(Peerp, Peer) ->
-    debug("PEERCP", ["State: new"]),
-    Peerp ! {self(), started},
-    state_idle(Peerp, Peer).
-
-state_idle(Sock, Peerp, Peer) ->
-    gen_tcp:close(Sock),
-    ?MODULE:state_idle(Peerp, Peer).
-
-state_idle(Peerp, Peer) ->
-    debug("PEERCP", ["State: idle"]),
-    timer:sleep(1000),
-    ?MODULE:state_connect(Peerp, Peer).
 
 %%
 %%
 %%
-state_connect(Peerp, Peer) ->
-    debug("PEERCP", ["State: connect"]),
-    {ok, Sock} = gen_tcp:connect(Peer#peer.ip, 179, [binary, {packet, 0}]),
-    debug("PEERCP", ["Sending OPEN... ~p", Sock]),
-    _BGP_Length = 29,
-    _BGP_AS = 16#ffaf,
-    _BGP_Holdtime = 180,
-    _BGP_Identifier = 16#12345678,
-    _BGP_Opt_Parm_Len = 0,
-    _BGP_Unused = 0,
-    _BGP_Rest = <<>>,
-    Head = ?BGP_OPEN_FMT,
-    gen_tcp:send(Sock, Head),
-    ?MODULE:state_opensent(Sock, Peerp, Peer).
-
-%%
-%%
-%%
-state_opensent_parse_open(_Sock, _Peerp, _Peer, OpenMsg) ->
+parse_open(OpenMsg) ->
     ?BGP_OPEN_FMT = OpenMsg,
     debug("PEERCP", ["BGP Ident: ~p~n", _BGP_Identifier]),
     case _BGP_AS of
@@ -80,67 +49,6 @@ state_opensent_parse_open(_Sock, _Peerp, _Peer, OpenMsg) ->
 	_ ->
 	    warning("PEERCP", ["Wrong ASN: ~p~n", _BGP_AS]),
 	    {error, bad_as}
-    end.
-
-
-%%
-%%
-%%
-state_opensent(Sock, Peerp, Peer) ->
-    debug("PEERCP", ["State: OpenSent"]),
-    receive
-	{From, status} ->
-	    info("PEERCP", ["FIXME: status"]),
-	    From ! {self(), "FIXME: status"};
-	{stop, Reason} ->
-	    info("PEERCP", ["Stop: ~p", Reason]);
-	{tcp_closed, Sock} ->
-	    ?MODULE:state_idle(Sock, Peerp, Peer);
-	%% Expected message
-	{tcp, Sock, Msg} ->
-	    {ok, _} = state_opensent_parse_open(Sock, Peerp, Peer, Msg),
-	    gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT),
-	    ?MODULE:state_openconfirm(Sock, Peerp, Peer);
-	Any ->
-	    warning("PEERCP", ["Invalid message: ~p, continuing...", Any]),
-	    ?MODULE:state_opensent(Sock, Peerp, Peer)
-    after 3000 ->
-	    exit(reason)
-    end.
-
-iskeepalive(Msg) ->
-    {ok, Msg}.
-%%
-%%
-%%
-state_openconfirm(Sock, Peerp, Peer) ->
-    debug("PEERCP", ["State: openconfirm"]),
-    receive 
-	%% Expected message
-	{tcp, Sock, Msg} ->
-	    {ok, _} = iskeepalive(Msg),
-	    ?MODULE:state_established(Sock, Peerp, Peer);
-	{From, status} ->
-	    From ! "Status: FIXME",
-	    ?MODULE:state_openconfirm(Sock, Peerp, Peer);
-	Any ->
-	    warning("PEERCP", ["Invalid message: ~p, continuing...", Any]),
-	    ?MODULE:state_openconfirm(Sock, Peerp, Peer)
-    after 3000 ->
-	    ?MODULE:state_idle(Sock, Peerp, Peer)
-    end.
-
-%%
-%%
-%%
-state_active(Sock, Peerp, Peer) ->
-    debug("PEERCP", ["State: active"]),
-    receive 
-	{From, status} ->
-	    From ! "Status: FIXME",
-	    ?MODULE:state_active(Sock, Peerp, Peer);
-	Any ->
-	    warning("PEERCP", ["Invalid message: ~p", Any])
     end.
 
 
@@ -169,7 +77,7 @@ parse_int_array(Size, Bin) ->
 %%
 %%
 parse_update_pathattr_as_path(Val) ->
-    debug('PEERCP', ["parse_update_pathattr_as_path: ~p", Val]),
+    %%    debug('PEERCP', ["parse_update_pathattr_as_path: ~p", Val]),
     <<Type1:8, _Len:8, Rest/binary>> = Val,
     Type2 = case Type1 of
 		   1 -> as_set;
@@ -214,7 +122,7 @@ parse_update_pathattr_aggregator(Bin) ->
 parse_update_pathattr(<<>>) ->
     [];
 parse_update_pathattr(Pathattr) ->
-    debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
+    %%debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
      _F_Transitive:1,
      _F_Partial:1,
@@ -250,7 +158,7 @@ parse_update_pathattr(Pathattr) ->
 		 ?BGP_PATHATTR_AGGREGATOR -> 
 		     parse_update_pathattr_aggregator(Value);
 		 Any ->
-		     debug('PEERCP', ["Unknown path attribute ~p", Any])
+		     warning('PEERCP', ["Unknown path attribute ~p", Any])
     end,
     [Parsed|parse_update_pathattr(R3)].
 
@@ -299,9 +207,9 @@ parse_msg(Msg) ->
     ?BGP_HEADER_FMT = Msg,
     case _BGP_Head_Type of
 	?BGP_TYPE_OPEN ->
-	    {open, Msg};
+	    {open, parse_open(Msg)};
 	?BGP_TYPE_KEEPALIVE ->
-	    {keepalive, normal};
+	    keepalive;
 	?BGP_TYPE_UPDATE ->
 	    parse_update(Msg);
 	?BGP_TYPE_NOTIFICATION ->
@@ -314,71 +222,87 @@ parse_msg(Msg) ->
 %%
 %%
 %%
-state_established(Sock, Peerp, Peer) ->
-    debug("PEERCP", ["State: established"]),
-    receive 
-	{From, status} ->
-	    From ! "Status: FIXME",
-	    ?MODULE:state_established(Sock, Peerp, Peer);
-	{tcp, Sock, Msg} ->
-	    Parsed = parse_msg(Msg),
-	    debug('PEERCP', ["Parsed message: ~w", Parsed]),
-	    case Parsed of
-		{keepalive, _} ->
-		    {ok, normal};
-		{open, _} ->
-		    {ok, normal};
-		{update, _} ->
-		    {ok, normal};
-		{notification, _} ->
-		    {ok, normal}
-	    end,
-	    ?MODULE:state_established(Sock, Peerp, Peer);
-	{tcp_closed, Sock} ->
-	    info('PEERCP', ["Connection reset by peer"]),
-	    ?MODULE:state_idle(Sock, Peerp, Peer);
-	Any ->
-	    warning("PEERCP", ["Invalid message: ~p", Any]),
-	    ?MODULE:state_established(Sock, Peerp, Peer)
-    after 1000 ->
-	    check_send_keepalive(Sock),
-	    ?MODULE:state_established(Sock, Peerp, Peer)
-    end.
+do_send_keepalive(Sock) ->
+    %%debug("PEERCP", ["Sending keepalive"]),
+    gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT),
+    {ack, 'Sent keepalive'}.
 
-%%
-%%
-%%
-send_keepalive(Sock) ->
-    debug("PEERCP", ["Sending keepalive"]),
-    gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT).
+do_send_open(Sock, _Peer) ->
+    %%debug("PEERCP", ["Sending OPEN... ~p", Sock]),
+    _BGP_Length = 29,
+    _BGP_AS = 16#ffaf,
+    _BGP_Holdtime = 180,
+    _BGP_Identifier = 16#12345678,
+    _BGP_Opt_Parm_Len = 0,
+    _BGP_Unused = 0,
+    _BGP_Rest = <<>>,
+    Head = ?BGP_OPEN_FMT,
+    gen_tcp:send(Sock, Head),
+    {ack, 'Sent open'}.
     
-%%
-%% FIXME: Don't send too often
-%%
-check_send_keepalive(Sock) ->
-    send_keepalive(Sock).
 
-testloop(Peercp, Peer) ->
+%%
+%% API
+%%
+connect(Peercp) ->
+    Peercp ! {self(), connect}.
+stop(Peercp) ->
+    Peercp ! {self(), stop}.
+send_open(Peercp) ->
+    Peercp ! {self(), open}.
+send_keepalive(Peercp) ->
+    Peercp ! {self(), keepalive}.
+
+%%
+%%
+%%
+state_idle(Peerp, Peer) ->
     receive
-	Any ->
-	    info("PEERCP-TEST", ["Msg from peercp: ~p", Any]),
-	    ?MODULE:testloop(Peercp, Peer)
+	{Peerp, connect} ->
+	    {ok, Sock} = gen_tcp:connect(Peer#peer.ip,
+					 Peer#peer.port,
+					 [binary, {packet, 0}]),
+	    Peerp ! {self(), {ok, connected}},
+	    state_connected(Sock, Peerp, Peer)
     end.
 
-test() ->
-    Peer = #peer{ip="192.168.42.206",
-		 as=65021},
-    Peercp = start(self(), Peer),
 
+state_connected(Sock, Peerp, Peer) ->
     receive
-	{Peercp, started} ->
-	    info("PEERCP-TEST", ["Msg from peercp ~p: started", Peercp]),
-	    testloop(Peercp, Peer)
-    after 1000 ->
-	    warning("PEERCP-TEST", ["Timeout waiting for startup msg"])
-    end,
-    testloop(Peercp, Peer).
+	%% From Peerp
+	{Peerp, stop} ->
+	    exit(killed);
+
+	{Peerp, open} ->
+	    Peerp ! {self(), do_send_open(Sock, Peer)},
+	    state_connected(Sock, Peerp, Peer);
+
+	{Peerp, keepalive} ->
+	    Peerp ! {self(), do_send_keepalive(Sock)},
+	    state_connected(Sock, Peerp, Peer);
+
+	{Peerp, {announce, _Route}} ->
+	    Peerp ! {self(), {ack, announce}},
+	    state_connected(Sock, Peerp, Peer);
+
+	{Peerp, {withdraw, _Route}} ->
+	    Peerp ! {self(), {ack, withdraw}},
+	    state_connected(Sock, Peerp, Peer);
+
+	%% From socket
+	{tcp, Sock, Msg} ->
+	    Peerp ! {self(), parse_msg(Msg)},
+	    state_connected(Sock, Peerp, Peer);
+
+	{tcp_closed, Sock} ->
+	    Peerp ! {self(), {error, tcp_closed, Sock}},
+	    gen_tcp:close(Sock),
+	    state_idle(Peerp, Peer);
+	    
+	Any ->
+	    io:format("state_connected got bogus msg ~p~n", [Any]),
+	    state_connected(Sock, Peerp, Peer)
+    end.
 
 start(Peerp, Peer) ->
-    info("PEERCP", ["Starting ~w ~w", Peerp, Peer]),
-    spawn_link(?MODULE, state_new, [Peerp, Peer]).
+    spawn(?MODULE, state_idle, [Peerp, Peer]).

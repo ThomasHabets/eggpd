@@ -7,153 +7,128 @@
 %%%-------------------------------------------------------------------
 -module(peerp).
 
--behaviour(gen_server).
-
 %% API
--export([start_link/0,
-	 start/0,
+-export([start_link/2,
+	 start/2,
+	 state_new/2,
+	 state_idle/3,
+	 state_connect/3,
+	 state_opensent/3,
 	 announce_route/1,
 	 withdraw_route/1,
 	 fail/0,
 	 stop/0,
 	 reset/0,
-	 clear/0
+	 clear/0,
+	 test/0
 	]).
 
-%% gen_server callbacks
--export([init/1,
-	 handle_call/3,
-	 handle_cast/2,
-	 handle_info/2,
-	 terminate/2,
-	 code_change/3]).
+-include("records.hrl").
 
--record(state, {}).
+%-record(state, {}).
 
-%%====================================================================
 %% API
-%%====================================================================
-%%--------------------------------------------------------------------
-%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
-%% Description: Starts the server
-%%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-start() ->
-    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
-
-announce_route(Route) -> gen_server:call(?MODULE, {announce_route, Route}).
-withdraw_route(Route) -> gen_server:call(?MODULE, {withdraw_route, Route}).
-reset()               -> gen_server:call(?MODULE, reset).
-fail()                -> gen_server:call(?MODULE, fail).
-stop()                -> gen_server:call(?MODULE, stop).
-clear()               -> gen_server:call(?MODULE, clear).
-
-%%====================================================================
-%% gen_server callbacks
-%%====================================================================
-
-%%--------------------------------------------------------------------
-%% Function: init(Args) -> {ok, State} |
-%%                         {ok, State, Timeout} |
-%%                         ignore               |
-%%                         {stop, Reason}
-%% Description: Initiates the server
-%%--------------------------------------------------------------------
-init([]) ->
-    {ok, #state{}}.
-
-
-%% state_connected() ->
-%%     io:format("Peerp: state=connected~n"),
-%%     receive
-%% 	{tcp, Socket, Bin} ->
-%% 	    io:format("Got: ~w  ~w~n", Socket, Bin),
-%% 	    ?MODULE:state_connected();
-%% 	{tcp_closed, _Socket, _Bin} ->
-%% 	    ?MODULE:state_initial()
-%%     end.
-
-%% do_listen() ->
-%%     {ok, Listen} = gen_tcp:listen(179, [ binary, {packet, 4},
-%% 					 {reuseaddr, true},
-%% 					 {active, true}]),
-%%     {ok, Socket} = get_tcp:accept(Listen),
-%%     Socket.
-%% state_initial() ->
-%%     io:format("Peerp: state=initial~n"),
-%%     {ok, Socket} = gen_tcp:connect('192.168.42.253', 179,
-%% 				  [binary, {packet, 0}]),
-%%     receive
-%% 	{tcp, Socket, Bin} ->
-%% 	    io:format("Got: ~w  ~w~n", Socket, Bin)
-%%     end,
-%%     state_connected().
-
-%%--------------------------------------------------------------------
-%% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
-%%                                      {reply, Reply, State, Timeout} |
-%%                                      {noreply, State} |
-%%                                      {noreply, State, Timeout} |
-%%                                      {stop, Reason, Reply, State} |
-%%                                      {stop, Reason, State}
-%% Description: Handling call messages
-%%--------------------------------------------------------------------
-handle_call({announce_route, Route}, _From, State) ->
-    io:format("PEERP> announce route: ~p~n", [Route]),
-    {reply, ok, State};
-
-handle_call({withdraw_route, Route}, _From, State) ->
-    io:format("PEERP> withdraw route: ~p~n", [Route]),
-    {reply, ok, State};
-    
-handle_call(clear, _From, State) ->
-    io:format("PEERP> stop~n"),
-    {reply, ok, State};
-
-handle_call(stop, _From, State) ->
-    io:format("PEERP> stop~n"),
-    {stop, normal, stopped, State};
-
-handle_call(Request, From, State) ->
-    io:format("PEERP> warning: unknown call ~p from ~p~n", [Request, From]),
-    {stop, 'Invalid call', State}.
-
-%%--------------------------------------------------------------------
-%% Function: handle_cast(Msg, State) -> {noreply, State} |
-%%                                      {noreply, State, Timeout} |
-%%                                      {stop, Reason, State}
-%% Description: Handling cast messages
-%%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% Function: handle_info(Info, State) -> {noreply, State} |
-%%                                       {noreply, State, Timeout} |
-%%                                       {stop, Reason, State}
-%% Description: Handling all non call/cast messages
-%%--------------------------------------------------------------------
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%%--------------------------------------------------------------------
-%% Function: terminate(Reason, State) -> void()
-%% Description: This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any necessary
-%% cleaning up. When it returns, the gen_server terminates with Reason.
-%% The return value is ignored.
-%%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+announce_route(_Route) ->
+    ok.
+withdraw_route(_Route) ->
+    ok.
+fail() ->
+    ok.
+stop() ->
+    ok.
+reset() ->
+    ok.
+clear() ->
     ok.
 
-%%--------------------------------------------------------------------
-%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% Description: Convert process state when code is changed
-%%--------------------------------------------------------------------
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+start_link(RibP, Peer) ->
+    spawn_link(?MODULE, state_new, [RibP, Peer]).
 
-%%--------------------------------------------------------------------
-%%% Internal functions
-%%--------------------------------------------------------------------
+start(RibP, Peer) ->
+    spawn(?MODULE, state_new, [RibP, Peer]).
+
+%%
+%% States
+%%
+state_reset(Parent, Peercp, Peer) ->
+    peercp:stop(self(), Peer),
+    state_reset_wait(Parent, Peercp, Peer).
+
+state_reset_wait(Parent, Peercp, Peer) ->
+    receive
+	Any ->
+	    io:format("Peerp> state_connected: unexpected ~p~n", [Any]),
+	    state_reset_wait(Parent, Peercp, Peer)
+    after 100 ->
+	    state_new(Parent, Peer)
+    end.
+
+	    
+state_new(Parent, Peer) ->
+    Peercp = peercp:start(self(), Peer),
+    link(Peercp),
+    state_idle(Parent, Peercp, Peer).
+
+
+state_idle(Parent, Peercp, Peer) ->
+    receive
+	{_From, stop} ->
+	    exit(signallet)
+    after 1000 ->
+	    peercp:connect(Peercp),
+	    state_connect(Parent, Peercp, Peer)
+    end.
+
+state_connect(Parent, Peercp, Peer) ->
+    receive
+	{Peercp, {ack, _}} ->                      % Ignore these
+	    state_connect(Parent, Peercp, Peer);	    
+	{Peercp, {ok, connected}} ->
+	    peercp:send_open(Peercp),
+	    state_opensent(Parent, Peercp, Peer);
+	Any ->
+	    io:format("Peerp> state_connected: unexpected ~p~n", [Any]),
+	    state_reset(Parent, Peercp, Peer)
+    end.
+
+state_opensent(Parent, Peercp, Peer) ->
+    receive
+	{Peercp, {ack, _}} ->                      % Ignore these
+	    state_opensent(Parent, Peercp, Peer);	    
+	{Peercp, {open, _Msg}} ->
+	    peercp:send_keepalive(Peercp),
+	    state_openconfirm(Parent, Peercp, Peer);
+	Any ->
+	    io:format("Peerp> state_opensent: unexpected ~p~n", [Any])
+    end.
+
+state_openconfirm(Parent, Peercp, Peer) ->
+    receive
+	{Peercp, {ack, _}} ->                      % Ignore these
+	    state_openconfirm(Parent, Peercp, Peer);	    
+	{Peercp, keepalive} ->
+	    state_established(Parent, Peercp, Peer);
+	Any ->
+	    io:format("Peerp> state_openconfirm: unexpected ~p~n", [Any])
+    end.
+    
+state_established(Parent, Peercp, Peer) ->
+    receive
+	{Peercp, {ack, _}} ->                      % Ignore these
+	    state_established(Parent, Peercp, Peer);	    
+	{Peercp, {update, Msg}} ->
+	    io:format("Peerp> Update ~p!!~n", [Msg]),
+	    state_established(Parent, Peercp, Peer);
+	{Peercp, keepalive} ->
+	    state_established(Parent, Peercp, Peer);
+	Any ->
+	    io:format("Peerp> state_established: unexpected ~p~n", [Any])
+    after 3000 ->
+	    peercp:send_keepalive(Peercp),
+	    state_established(Parent, Peercp, Peer)
+    end.
+    
+test() ->
+    Peer = #peer{ip="192.168.42.206",
+		 as=65021},
+    state_new(self(), Peer).
