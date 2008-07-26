@@ -252,7 +252,6 @@ parse_update_pathattr(Pathattr) ->
 		 Any ->
 		     debug('PEERCP', ["Unknown path attribute ~p", Any])
     end,
-    io:format("Parsed: ~p~n", [Parsed]),
     [Parsed|parse_update_pathattr(R3)].
 
 
@@ -322,11 +321,8 @@ state_established(Sock, Peerp, Peer) ->
 	    From ! "Status: FIXME",
 	    ?MODULE:state_established(Sock, Peerp, Peer);
 	{tcp, Sock, Msg} ->
-	    io:format("11~n"),
 	    Parsed = parse_msg(Msg),
-	    io:format("12~n"),
 	    debug('PEERCP', ["Parsed message: ~w", Parsed]),
-	    io:format("13~n"),
 	    case Parsed of
 		{keepalive, _} ->
 		    {ok, normal};
