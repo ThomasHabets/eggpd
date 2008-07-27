@@ -9,7 +9,9 @@
 -record(peer, {
 	  ip,
 	  port = 179,
-	  as}).
+	  as,
+	  localport = 179,
+	  passive = false}).
 
 -record(route, {
 	  net,

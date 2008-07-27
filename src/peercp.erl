@@ -13,6 +13,7 @@
 -export([start/2,
 	 stop/1,
 	 connect/1,
+	 listen/1,
 	 send_open/1,
 	 send_keepalive/1,
 	 announce_route/3
@@ -20,7 +21,7 @@
 
 %% Internal
 -export([state_idle/2,
-	 state_connected/3,
+	 state_connected/4,
 	 fmt/1]).
 
 -include("records.hrl").
@@ -49,7 +50,6 @@ parse_open(OpenMsg) ->
 	    warning("PEERCP", ["Wrong ASN: ~p~n", _BGP_AS]),
 	    {error, bad_as}
     end.
-
 
 %%
 %%
@@ -346,6 +346,8 @@ pathattr_factory([{K,V}|Pathattrs]) ->
 %%
 connect(Peercp) ->
     Peercp ! {self(), connect}.
+listen(Peercp) ->
+    Peercp ! {self(), listen}.
 stop(Peercp) ->
     Peercp ! {self(), stop}.
 send_open(Peercp) ->
@@ -359,17 +361,60 @@ announce_route(Peercp, Path, Route) ->
 %%
 %%
 state_idle(Peerp, Peer) ->
+    enter_state_idle(false, Peerp, Peer).
+
+enter_state_idle(LSock, Peerp, Peer) ->
+    io:format("peercp> state_idle~n"),
+    state_idle(LSock, Peerp, Peer).
+
+state_idle(LSock, Peerp, Peer) ->
     receive
 	{Peerp, connect} ->
-	    {ok, Sock} = gen_tcp:connect(Peer#peer.ip,
-					 Peer#peer.port,
-					 [binary, {packet, 0}]),
-	    Peerp ! {self(), {ok, connected}},
-	    state_connected(Sock, Peerp, Peer)
+	    R = gen_tcp:connect(Peer#peer.ip,
+				Peer#peer.port,
+				[binary, {packet, 0}],
+				1000),
+	    case R of
+		{ok, Sock} ->
+		    enter_state_connected(LSock, Sock, Peerp, Peer);
+		Any ->
+		    io:format("peercp> connect() failed: ~p~n", [Any]),
+		    Peerp ! {self(), {error, {connect, timeout}}},
+		    state_idle(LSock, Peerp, Peer)
+	    end;
+
+	{Peerp, listen} ->
+	    LS = gen_tcp:listen(Peer#peer.localport,
+				[binary]),
+	    case LS of
+		{ok, LS1} ->
+		    state_idle(LS1, Peerp, Peer);
+		Any ->
+		    io:format("peercp> listen() failed: ~p~n", [Any]),
+		    state_idle(LSock, Peerp, Peer)
+	    end
+    after 1000 ->
+	    case LSock of
+		false ->
+		    state_idle(LSock, Peerp, Peer);
+		_ ->
+		    R = gen_tcp:accept(LSock, 0),
+		    case R of
+			{ok, Sock} ->
+			    enter_state_connected(LSock, Sock, Peerp, Peer);
+			_ ->
+			    state_idle(LSock, Peerp, Peer)
+		    end
+	    end
     end.
 
 
-state_connected(Sock, Peerp, Peer) ->
+enter_state_connected(LSock, Sock, Peerp, Peer) ->
+    io:format("Peerpc> state_connected~n"),
+    Peerp ! {self(), {ok, connected}},
+    state_connected(LSock, Sock, Peerp, Peer).
+
+state_connected(LSock, Sock, Peerp, Peer) ->
     receive
 	%% From Peerp
 	{Peerp, stop} ->
@@ -377,33 +422,33 @@ state_connected(Sock, Peerp, Peer) ->
 
 	{Peerp, open} ->
 	    Peerp ! {self(), do_send_open(Sock, Peer)},
-	    state_connected(Sock, Peerp, Peer);
+	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, keepalive} ->
 	    Peerp ! {self(), do_send_keepalive(Sock)},
-	    state_connected(Sock, Peerp, Peer);
+	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, {announce, Path, Route}} ->
 	    Peerp ! {self(), do_announce_route(Sock, Path, Route)},
-	    state_connected(Sock, Peerp, Peer);
+	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, {withdraw, _Route}} ->
 	    Peerp ! {self(), {ack, withdraw}},
-	    state_connected(Sock, Peerp, Peer);
+	    state_connected(LSock, Sock, Peerp, Peer);
 
 	%% From socket
 	{tcp, Sock, Msg} ->
 	    parse_all_msgs(Peerp, Msg),
-	    state_connected(Sock, Peerp, Peer);
+	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{tcp_closed, Sock} ->
 	    Peerp ! {self(), {error, {tcp_closed, Sock}}},
 	    gen_tcp:close(Sock),
-	    state_idle(Peerp, Peer);
+	    state_idle(LSock, Peerp, Peer);
 	    
 	Any ->
 	    io:format("state_connected got bogus msg ~p~n", [Any]),
-	    state_connected(Sock, Peerp, Peer)
+	    state_connected(LSock, Sock, Peerp, Peer)
     end.
 
 start(Peerp, Peer) ->

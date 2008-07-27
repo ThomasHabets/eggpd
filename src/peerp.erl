@@ -13,6 +13,7 @@
 	 start/2,
 	 state_new/2,
 	 state_idle/3,
+	 state_active/3,
 	 state_connect/3,
 	 state_opensent/3,
 	 announce_route/1,
@@ -58,7 +59,7 @@ state_reset(Parent, Peercp, Peer) ->
 state_reset_wait(Parent, Peercp, Peer) ->
     receive
 	Any ->
-	    io:format("Peerp> state_connected: unexpected ~p~n", [Any]),
+	    io:format("Peerp> state_connected: flushed ~p~n", [Any]),
 	    state_reset_wait(Parent, Peercp, Peer)
     after 100 ->
 	    state_new(Parent, Peer)
@@ -76,6 +77,16 @@ state_idle(Parent, Peercp, Peer) ->
 	{_From, stop} ->
 	    exit(signallet)
     after 1000 ->
+	    peercp:listen(Peercp),
+	    enter_state_connect(Parent, Peercp, Peer)
+    end.
+
+enter_state_connect(Parent, Peercp, Peer) ->
+    case Peer#peer.passive of
+	true ->
+	    enter_state_active(Parent, Peercp, Peer);
+	false ->
+	    io:format("Peerp> state_connect~n"),
 	    peercp:connect(Peercp),
 	    state_connect(Parent, Peercp, Peer)
     end.
@@ -84,6 +95,8 @@ state_connect(Parent, Peercp, Peer) ->
     receive
 	{Peercp, {ack, _}} ->                      % Ignore these
 	    state_connect(Parent, Peercp, Peer);	    
+	{Peercp, {error, {connect, timeout}}} ->
+	    enter_state_active(Parent, Peercp, Peer);
 	{Peercp, {ok, connected}} ->
 	    peercp:send_open(Peercp),
 	    state_opensent(Parent, Peercp, Peer);
@@ -92,6 +105,25 @@ state_connect(Parent, Peercp, Peer) ->
 	    state_reset(Parent, Peercp, Peer)
     end.
 
+
+enter_state_active(Parent, Peercp, Peer) ->
+    io:format("Peerp> state_active~n"),
+    state_active(Parent, Peercp, Peer).
+
+state_active(Parent, Peercp, Peer) ->
+    receive
+	{Peercp, {ack, _}} ->                      % Ignore these
+	    state_active(Parent, Peercp, Peer);	    
+	{Peercp, {ok, connected}} ->
+	    peercp:send_open(Peercp),
+	    state_opensent(Parent, Peercp, Peer);
+	Any ->
+	    io:format("Peerp> state_active: unexpected ~p~n", [Any]),
+	    state_reset(Parent, Peercp, Peer)
+    after 15000 ->
+	    enter_state_connect(Parent, Peercp, Peer)
+    end.
+    
 state_opensent(Parent, Peercp, Peer) ->
     receive
 	{Peercp, {ack, _}} ->                      % Ignore these
@@ -151,8 +183,9 @@ flood_routes(_Parent, Peercp, _Peer, N) ->
 
 test() ->
     _Peer1 = #peer{ip="192.168.42.206",
-    		 as=65021},
+		   as=65021,
+		   passive=true},
     _Peer2 = #peer{ip="192.168.42.118",
-		 as=65501},
+		   as=65501},
     Peer = _Peer2,
     state_new(self(), Peer).
