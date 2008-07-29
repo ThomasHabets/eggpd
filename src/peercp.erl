@@ -58,10 +58,14 @@ parse_update_withdraw(<<>>) ->
     [];
 parse_update_withdraw(Withdraw) ->
     %debug('PEERCP', ["blaha: ~p", Withdraw]),
-    <<H:1, R1/binary>> = Withdraw,
-    Hb = H*8,
-    <<D:Hb, R2/binary>> = R1,
-    [D|parse_update_withdraw(R2)].
+    <<Len:8, R1/binary>> = Withdraw,
+    GLen = (8-(Len rem 8)) rem 8,
+    %debug('PEERCP', ["paaarse ~p ~p", Len, GLen]),
+    <<Prefix1:Len,
+     _Garbage:GLen,
+     R2/binary>> = R1,
+    Prefix2 = Prefix1 bsl (32-Len),
+    [{Prefix2, Len}|parse_update_info(R2)].
 
 %%
 %%

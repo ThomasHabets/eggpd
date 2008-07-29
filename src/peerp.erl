@@ -159,11 +159,28 @@ print_infolist([H|T]) ->
     print_info(H),
     print_infolist(T).
 
-handle_update(_Parent, _Peercp, _Peer, Msg) ->
-    {withdraw, _WList,
-     pathattr, _PAList,
+send_withdrawn(Parent, PAList, WList) ->
+    if
+	length(WList) > 0 ->
+	    Parent ! {self(), {withdrawn_routes, {PAList, WList}}};
+	true ->
+	    true
+    end.
+
+send_received(Parent, PAList, Info) ->
+    if
+	length(Info) > 0 ->
+	    Parent ! {self(), {received_routes, {PAList, Info}}};
+	true ->
+	    true
+    end.
+
+handle_update(Parent, _Peercp, _Peer, Msg) ->
+    {withdraw, WList,
+     pathattr, PAList,
      info,     Info} = Msg,
-    print_infolist(Info).
+    send_withdrawn(Parent, PAList, WList),
+    send_received(Parent, PAList, Info).
 
 state_established(Parent, Peercp, Peer) ->
     receive

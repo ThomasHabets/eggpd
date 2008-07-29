@@ -4,7 +4,8 @@ TARGETS=eggpd_app.beam \
 	fibp.beam \
 	ribp.beam \
 	peerp.beam \
-	peercp.beam
+	peercp.beam \
+	routemon.beam
 
 .SUFFIXES: .erl .beam
 
