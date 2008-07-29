@@ -11,6 +11,7 @@
 	  port = 179,
 	  as,
 	  localport = 179,
+	  localas,
 	  passive = false}).
 
 -record(route, {

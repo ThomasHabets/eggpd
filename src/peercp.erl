@@ -112,8 +112,8 @@ parse_update_pathattr_atomic_aggregate(_Bin) ->
 %%
 %%
 parse_update_pathattr_aggregator(Bin) ->
-    <<AS:16>> = Bin,
-    {aggregator, AS}.
+    <<AS:16, IP:32>> = Bin,
+    {aggregator, AS, IP}.
 
 %%
 %%
@@ -121,7 +121,7 @@ parse_update_pathattr_aggregator(Bin) ->
 parse_update_pathattr(<<>>) ->
     [];
 parse_update_pathattr(Pathattr) ->
-    debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
+    %%debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
      _F_Transitive:1,
      _F_Partial:1,
@@ -206,10 +206,24 @@ parse_all_msgs(_Peerp, <<>>) ->
     ok;
 
 parse_all_msgs(Peerp, Msg) ->
-    ?BGP_HEADER_FMT = Msg,
-    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
-    parse_msg(Peerp, Msg1),
-    parse_all_msgs(Peerp, Msg2).
+    if
+	size(Msg) < 19 ->
+	    put(tcp_buffer, Msg);
+	true ->
+	    ?BGP_HEADER_FMT = Msg,
+	    if
+		size(Msg) < _BGP_Head_Length ->
+		    put(tcp_buffer, Msg);
+		
+		size(Msg) == _BGP_Head_Length ->
+		    parse_msg(Peerp, Msg);
+		
+		size(Msg) > _BGP_Head_Length ->
+		    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
+		    parse_msg(Peerp, Msg1),
+		    parse_all_msgs(Peerp, Msg2)
+	    end
+    end.
 
 parse_msg(Peerp, Msg) ->
     ?BGP_HEADER_FMT = Msg,
@@ -240,7 +254,7 @@ do_send_keepalive(Sock) ->
 do_send_open(Sock, _Peer) ->
     %%debug("PEERCP", ["Sending OPEN... ~p", Sock]),
     _BGP_Length = 29,
-    _BGP_AS = 16#ffaf,
+    _BGP_AS = 16#fe01,    % ffaf=65455
     _BGP_Holdtime = 180,
     _BGP_Identifier = 16#12345678,
     _BGP_Opt_Parm_Len = 0,
@@ -412,6 +426,7 @@ state_idle(LSock, Peerp, Peer) ->
 enter_state_connected(LSock, Sock, Peerp, Peer) ->
     io:format("Peerpc> state_connected~n"),
     Peerp ! {self(), {ok, connected}},
+    put(tcp_buffer, <<>>),
     state_connected(LSock, Sock, Peerp, Peer).
 
 state_connected(LSock, Sock, Peerp, Peer) ->
@@ -438,7 +453,9 @@ state_connected(LSock, Sock, Peerp, Peer) ->
 
 	%% From socket
 	{tcp, Sock, Msg} ->
-	    parse_all_msgs(Peerp, Msg),
+	    Msg1 = list_to_binary([get(tcp_buffer), Msg]),
+	    put(tcp_buffer, <<>>),
+	    parse_all_msgs(Peerp, Msg1),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{tcp_closed, Sock} ->

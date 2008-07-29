@@ -140,18 +140,38 @@ state_openconfirm(Parent, Peercp, Peer) ->
 	{Peercp, {ack, _}} ->                      % Ignore these
 	    state_openconfirm(Parent, Peercp, Peer);	    
 	{Peercp, keepalive} ->
-	    flood_routes(Parent, Peercp, Peer),
+	    %%flood_routes(Parent, Peercp, Peer),
 	    state_established(Parent, Peercp, Peer);
 	Any ->
 	    io:format("Peerp> state_openconfirm: unexpected ~p~n", [Any])
     end.
-    
+
+print_info({Net, Len}) ->
+    A=Net bsr 24,
+    B=(Net bsr 16) band 255,
+    C=(Net bsr 8) band 255,
+    D=Net band 255,
+    io:format("    ~p.~p.~p.~p/~p~n", [A,B,C,D,Len]).
+
+print_infolist([]) ->
+    true;
+print_infolist([H|T]) ->
+    print_info(H),
+    print_infolist(T).
+
+handle_update(_Parent, _Peercp, _Peer, Msg) ->
+    {withdraw, _WList,
+     pathattr, _PAList,
+     info,     Info} = Msg,
+    print_infolist(Info).
+
 state_established(Parent, Peercp, Peer) ->
     receive
 	{Peercp, {ack, _}} ->                      % Ignore these
 	    state_established(Parent, Peercp, Peer);	    
 	{Peercp, {update, Msg}} ->
-	    io:format("Peerp> Got Update ~p!!~n", [Msg]),
+	    handle_update(Parent, Peercp, Peer, Msg),
+	    %%io:format("Peerp> Got Update ~p!!~n", [Msg]),
 	    state_established(Parent, Peercp, Peer);
 	{Peercp, keepalive} ->
 	    state_established(Parent, Peercp, Peer);
@@ -187,5 +207,9 @@ test() ->
 		   passive=true},
     _Peer2 = #peer{ip="192.168.42.118",
 		   as=65501},
-    Peer = _Peer2,
+    _Peer3 = #peer{ip="217.118.211.82",
+		   as=65025,
+		   localas=65025,
+		   localport=0},
+    Peer = _Peer3,
     state_new(self(), Peer).
