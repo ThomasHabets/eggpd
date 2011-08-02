@@ -1,16 +1,15 @@
 %%%-------------------------------------------------------------------
 %%% File    : eggpd_connection.erl
 %%% Author  : Thomas Habets <thomas@habets.se>
-%%% Description :
+%%% Description : This is the only impure module (so far) in eggpd.
 %%%
-%%% Created :  26 Jul 2008 by Thomas Habets <thomas@habets.se>
+%%% Created :  26 Jul 2008,2011 by Thomas Habets <thomas@habets.se>
 %%%-------------------------------------------------------------------
 -module(eggpd_connection).
 
 %%
 %% API
 %%
--compile(export_all).
 -export([start_link/1]).
 %% Internal
 
