@@ -1,10 +1,12 @@
 # eggpd/Makefile
 TARGETS=eggpd_app.beam \
-	eggpd_super.beam \
+	eggpd_sup.beam \
+	eggpd_peer_sup.beam \
+	eggpd.beam \
 	fibp.beam \
 	ribp.beam \
-	peerp.beam \
-	peercp.beam \
+	eggpd_peer.beam \
+	eggpd_connection.beam \
 	routemon.beam
 
 .SUFFIXES: .erl .beam

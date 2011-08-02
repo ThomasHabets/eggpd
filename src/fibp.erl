@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% File    : fibp.erl
-%%% Author  : Thomas Habets <thomas@habets.pp.se>
+%%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description : 
 %%%
-%%% Created :  24 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
+%%% Created :  24 Jul 2008 by Thomas Habets <thomas@habets.se>
 %%%-------------------------------------------------------------------
 -module(fibp).
 

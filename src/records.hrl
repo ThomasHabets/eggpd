@@ -6,6 +6,7 @@
 %%% Created :  26 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
 %%%-------------------------------------------------------------------
 
+
 -record(peer, {
 	  ip,
 	  port = 179,
@@ -18,6 +19,11 @@
 	  net,
 	  prefixlen,
 	  nexthop
+	  }).
+
+-record(peer_state, {
+	  connection,
+	  peer
 	  }).
 
 -define(BGP_MARKER, 16#ffffffff).

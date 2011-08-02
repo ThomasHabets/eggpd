@@ -31,7 +31,7 @@
 %%--------------------------------------------------------------------
 
 start(_Type, StartArgs) ->
-    eggpd_super:start_link(StartArgs).
+    eggpd_sup:start_link(StartArgs).
 
 %%--------------------------------------------------------------------
 %% Function: stop(State) -> void()

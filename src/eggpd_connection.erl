@@ -1,55 +1,34 @@
 %%%-------------------------------------------------------------------
-%%% File    : peercp.erl
-%%% Author  : Thomas Habets <thomas@habets.pp.se>
+%%% File    : eggpd_connection.erl
+%%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description :
 %%%
-%%% Created :  26 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
+%%% Created :  26 Jul 2008 by Thomas Habets <thomas@habets.se>
 %%%-------------------------------------------------------------------
--module(peercp).
+-module(eggpd_connection).
 
 %%
 %% API
 %%
--export([start/2,
-	 stop/1,
-	 connect/1,
-	 listen/1,
-	 send_open/1,
-	 send_keepalive/1,
-	 announce_route/3
-	 ]).
-
+-compile(export_all).
+-export([start_link/1]).
 %% Internal
--export([state_idle/2,
-	 state_connected/4,
-	 fmt/1]).
 
 -include("records.hrl").
 
-fmt(X) ->
-    [F|T] = X,
-    lists:flatten(io_lib:format(F, T)).
 
-warning(P, X) ->
-    io:format("~p> WARNING ~p~n", [P,fmt(X)]).
-
-debug(P, X) ->
-    io:format("~p> DEBUG ~p ~n", [P,fmt(X)]).
-
+%%
+%% States
+%%
 
 %%
 %%
 %%
-parse_open(OpenMsg) ->
+parse_open(OpenMsg, Peer) ->
     ?BGP_OPEN_FMT = OpenMsg,
-    debug("PEERCP", ["BGP Ident: ~p~n", _BGP_Identifier]),
-    case _BGP_AS of
-	65021 ->
-	    {ok, _BGP_AS};
-	_ ->
-	    warning("PEERCP", ["Wrong ASN: ~p~n", _BGP_AS]),
-	    {error, bad_as}
-    end.
+    io:format("Con BGP Ident: ~p~n", [_BGP_Identifier]),
+    _BGP_AS =:= Peer#peer.as,
+    {todo, options, here}.
 
 %%
 %%
@@ -57,10 +36,10 @@ parse_open(OpenMsg) ->
 parse_update_withdraw(<<>>) ->
     [];
 parse_update_withdraw(Withdraw) ->
-    %debug('PEERCP', ["blaha: ~p", Withdraw]),
+    %io:format('EGGPD_CONNECTION', ["blaha: ~p", Withdraw]),
     <<Len:8, R1/binary>> = Withdraw,
     GLen = (8-(Len rem 8)) rem 8,
-    %debug('PEERCP', ["paaarse ~p ~p", Len, GLen]),
+    %io:format('EGGPD_CONNECTION', ["paaarse ~p ~p", Len, GLen]),
     <<Prefix1:Len,
      _Garbage:GLen,
      R2/binary>> = R1,
@@ -80,7 +59,7 @@ parse_int_array(Size, Bin) ->
 %%
 %%
 parse_update_pathattr_as_path(Val) ->
-    %%    debug('PEERCP', ["parse_update_pathattr_as_path: ~p", Val]),
+    %%    io:format('EGGPD_CONNECTION', ["parse_update_pathattr_as_path: ~p", Val]),
     <<Type1:8, _Len:8, Rest/binary>> = Val,
     Type2 = case Type1 of
 		   1 -> as_set;
@@ -125,7 +104,7 @@ parse_update_pathattr_aggregator(Bin) ->
 parse_update_pathattr(<<>>) ->
     [];
 parse_update_pathattr(Pathattr) ->
-    %%debug('PEERCP', ["pathattr parse: ~p", Pathattr]),
+    %%io:format('EGGPD_CONNECTION', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
      _F_Transitive:1,
      _F_Partial:1,
@@ -161,7 +140,7 @@ parse_update_pathattr(Pathattr) ->
 		 ?BGP_PATHATTR_AGGREGATOR -> 
 		     parse_update_pathattr_aggregator(Value);
 		 Any ->
-		     warning('PEERCP', ["Unknown path attribute ~p", Any])
+		     io:format("Unknown path attribute ~p", [Any])
     end,
     [Parsed|parse_update_pathattr(R3)].
 
@@ -172,10 +151,10 @@ parse_update_pathattr(Pathattr) ->
 parse_update_info(<<>>) ->
     [];
 parse_update_info(Info) ->
-    %debug('PEERCP', ["Update Info parse: ~p", Info]),
+    %io:format('EGGPD_CONNECTION', ["Update Info parse: ~p", Info]),
     <<Len:8, R1/binary>> = Info,
     GLen = (8-(Len rem 8)) rem 8,
-    %debug('PEERCP', ["paaarse ~p ~p", Len, GLen]),
+    %io:format('EGGPD_CONNECTION', ["paaarse ~p ~p", Len, GLen]),
     <<Prefix1:Len,
      _Garbage:GLen,
      R2/binary>> = R1,
@@ -206,10 +185,10 @@ parse_update(Msg) ->
 %%
 %%
 %%
-parse_all_msgs(_Peerp, <<>>) ->
+parse_all_msgs(_Peerp, <<>>, Peer) ->
     ok;
 
-parse_all_msgs(Peerp, Msg) ->
+parse_all_msgs(Peerp, Msg, Peer) ->
     if
 	size(Msg) < 19 ->
 	    put(tcp_buffer, Msg);
@@ -220,45 +199,44 @@ parse_all_msgs(Peerp, Msg) ->
 		    put(tcp_buffer, Msg);
 		
 		size(Msg) == _BGP_Head_Length ->
-		    parse_msg(Peerp, Msg);
+		    parse_msg(Peerp, Msg, Peer);
 		
 		size(Msg) > _BGP_Head_Length ->
 		    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
-		    parse_msg(Peerp, Msg1),
-		    parse_all_msgs(Peerp, Msg2)
+		    parse_msg(Peerp, Msg1, Peer),
+		    parse_all_msgs(Peerp, Msg2, Peer)
 	    end
     end.
 
-parse_msg(Peerp, Msg) ->
+parse_msg(Peerp, Msg, Peer) ->
     ?BGP_HEADER_FMT = Msg,
-    Peerp ! {self(), case _BGP_Head_Type of
-			 ?BGP_TYPE_OPEN ->
-			     {open, parse_open(Msg)};
-			 ?BGP_TYPE_KEEPALIVE ->
-			     keepalive;
-			 ?BGP_TYPE_UPDATE ->
-			     parse_update(Msg);
-			 ?BGP_TYPE_NOTIFICATION ->
-			     {notification, Msg};
-			 Other ->
-			     warning('PEERCP',
-				     ["Unknown BGP message type: ~p",
-				      Other]),
-			     {error, Other}
-		     end}.
+    gen_fsm:send_event(Peerp, case _BGP_Head_Type of
+				  ?BGP_TYPE_OPEN ->
+				      {open, parse_open(Msg, Peer)};
+				  ?BGP_TYPE_KEEPALIVE ->
+				      keepalive;
+				  ?BGP_TYPE_UPDATE ->
+				      parse_update(Msg);
+				  ?BGP_TYPE_NOTIFICATION ->
+				      {notification, Msg};
+				  Other ->
+				      io:format("Unknown BGP msg type: ~p",
+						[Other]),
+				      {error, Other}
+			      end).
     
 %%
 %%
 %%
 do_send_keepalive(Sock) ->
-    %%debug("PEERCP", ["Sending keepalive"]),
+    %%io:format("EGGPD_CONNECTION", ["Sending keepalive"]),
     gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT),
     {ack, 'Sent keepalive'}.
 
-do_send_open(Sock, _Peer) ->
-    %%debug("PEERCP", ["Sending OPEN... ~p", Sock]),
+do_send_open(Sock, Peer) ->
+    %%io:format("EGGPD_CONNECTION", ["Sending OPEN... ~p", Sock]),
     _BGP_Length = 29,
-    _BGP_AS = 16#fe01,    % ffaf=65455
+    _BGP_AS = Peer#peer.localas,
     _BGP_Holdtime = 180,
     _BGP_Identifier = 16#12345678,
     _BGP_Opt_Parm_Len = 0,
@@ -362,30 +340,33 @@ pathattr_factory([{K,V}|Pathattrs]) ->
 %%
 %% API
 %%
-connect(Peercp) ->
-    Peercp ! {self(), connect}.
-listen(Peercp) ->
-    Peercp ! {self(), listen}.
-stop(Peercp) ->
-    Peercp ! {self(), stop}.
-send_open(Peercp) ->
-    Peercp ! {self(), open}.
-send_keepalive(Peercp) ->
-    Peercp ! {self(), keepalive}.
-announce_route(Peercp, Path, Route) ->
-    Peercp ! {self(), {announce, Path, Route}}.
+connect(Con) ->
+    Con ! {self(), connect}.
+listen(Con) ->
+    Con ! {self(), listen}.
+stop(Con) ->
+    Con ! {self(), stop}.
+send_open(Con) ->
+    Con ! {self(), open}.
+send_keepalive(Con) ->
+    Con ! {self(), keepalive}.
+announce_route(Con, Path, Route) ->
+    Con ! {self(), {announce, Path, Route}}.
 
 %%
 %%
 %%
-state_idle(Peerp, Peer) ->
-    enter_state_idle(false, Peerp, Peer).
+state_idle(Parent, Peer) ->
+    io:format("connection> state_idle/2~n"),
+    enter_state_idle(false, Parent, Peer).
 
 enter_state_idle(LSock, Peerp, Peer) ->
-    io:format("peercp> state_idle~n"),
+    io:format("connection> entering idle~n"),
+    io:format("eggpd_connection> state_idle~n"),
     state_idle(LSock, Peerp, Peer).
 
 state_idle(LSock, Peerp, Peer) ->
+    io:format("connection> idle(~p, ~p, ~p)~n", [LSock, Peerp, Peer]),
     receive
 	{Peerp, connect} ->
 	    R = gen_tcp:connect(Peer#peer.ip,
@@ -396,7 +377,7 @@ state_idle(LSock, Peerp, Peer) ->
 		{ok, Sock} ->
 		    enter_state_connected(LSock, Sock, Peerp, Peer);
 		Any ->
-		    io:format("peercp> connect() failed: ~p~n", [Any]),
+		    io:format("connection> connect() failed: ~p~n", [Any]),
 		    Peerp ! {self(), {error, {connect, timeout}}},
 		    state_idle(LSock, Peerp, Peer)
 	    end;
@@ -408,7 +389,7 @@ state_idle(LSock, Peerp, Peer) ->
 		{ok, LS1} ->
 		    state_idle(LS1, Peerp, Peer);
 		Any ->
-		    io:format("peercp> listen() failed: ~p~n", [Any]),
+		    io:format("connection> listen() failed: ~p~n", [Any]),
 		    state_idle(LSock, Peerp, Peer)
 	    end
     after 1000 ->
@@ -427,11 +408,11 @@ state_idle(LSock, Peerp, Peer) ->
     end.
 
 
-enter_state_connected(LSock, Sock, Peerp, Peer) ->
+enter_state_connected(LSock, Sock, Parent, Peer) ->
     io:format("Peerpc> state_connected~n"),
-    Peerp ! {self(), {ok, connected}},
+    gen_fsm:send_event(Parent, connected),
     put(tcp_buffer, <<>>),
-    state_connected(LSock, Sock, Peerp, Peer).
+    state_connected(LSock, Sock, Parent, Peer).
 
 state_connected(LSock, Sock, Peerp, Peer) ->
     receive
@@ -440,26 +421,28 @@ state_connected(LSock, Sock, Peerp, Peer) ->
 	    exit(killed);
 
 	{Peerp, open} ->
-	    Peerp ! {self(), do_send_open(Sock, Peer)},
+	    io:format("con> Sending open~n"),
+	    do_send_open(Sock, Peer),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, keepalive} ->
-	    Peerp ! {self(), do_send_keepalive(Sock)},
+	    io:format("con> Sending keepalive~n"),
+	    do_send_keepalive(Sock),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, {announce, Path, Route}} ->
-	    Peerp ! {self(), do_announce_route(Sock, Path, Route)},
+	    do_announce_route(Sock, Path, Route),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, {withdraw, _Route}} ->
-	    Peerp ! {self(), {ack, withdraw}},
+	    %% FIXME
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	%% From socket
 	{tcp, Sock, Msg} ->
 	    Msg1 = list_to_binary([get(tcp_buffer), Msg]),
 	    put(tcp_buffer, <<>>),
-	    parse_all_msgs(Peerp, Msg1),
+	    parse_all_msgs(Peerp, Msg1, Peer),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{tcp_closed, Sock} ->
@@ -472,5 +455,6 @@ state_connected(LSock, Sock, Peerp, Peer) ->
 	    state_connected(LSock, Sock, Peerp, Peer)
     end.
 
-start(Peerp, Peer) ->
-    spawn(?MODULE, state_idle, [Peerp, Peer]).
+start_link(Peer) ->
+    io:format("connection> spawning ~p...~n", [Peer]),
+    spawn_link(?MODULE, state_idle, [self(), Peer]).
