@@ -11,6 +11,7 @@
 -export([
 	 interactive/0,
 	 start_link/0,
+	 add_peer/1,
 	 init/1]).
 
 %% Start from shell
@@ -21,16 +22,18 @@ interactive() ->
 start_link() ->
     supervisor:start_link({local,?MODULE}, ?MODULE, []).
 
+add_peer(IP)  ->
+    supervisor:start_child(?MODULE,
+			   {eggpd_peer,
+			    {eggpd_peer, start_link, [IP]},
+			    permanent, 
+			    10000, 
+			    worker, 
+			    dynamic}).
+
 %% Init supervisor. What subprocesses to monitor
 init([]) ->
-    Processes = [
-		 {eggpd_peer,
-		  {eggpd_peer, start_link, ["192.168.42.4"]},
-		  permanent, 
-		  10000, 
-		  worker, 
-		  dynamic}
-		],
+    Processes = [],
     {ok,
      {{one_for_one, 3, 10},
       Processes}

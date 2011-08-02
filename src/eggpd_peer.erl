@@ -16,9 +16,9 @@
 	 start_link/1,
 	 code_change/4,
 	 handle_event/3,
-	 %handle_info/3,
+	 %% handle_info/3,   % Ignore warning about missing callback
 	 handle_sync_event/4
-	 %terminate/3
+	 %% terminate/3      % Ignore warning about missing callback
 	]).
 -include("records.hrl").
 
@@ -27,67 +27,64 @@
 % debug
     
 handle_sync_event(get_event, _From, State, Data) ->
-    io:format("------> Sync event~n"),
+    io:format("peer(~p): ------> Sync event~n", [self()]),
     {reply, {State, Data}, State, Data}.
 
 %% API
 start_link(Peer) ->
     PeerConfig = #peer{ip=Peer, as=65020, localas=65021},
-    erlang:process_flag(trap_exit, true),
-    gen_fsm:start_link({local, ?MODULE}, ?MODULE, [PeerConfig], []).
+    gen_fsm:start_link(?MODULE, [PeerConfig], []).
 
 init([PeerConfig]) ->
-    Data = #peer_state{peer=PeerConfig},
-    {ok, _} = timer:apply_after(1000,
-				gen_fsm,send_event,
-				[eggpd_peer, automatic_start]),
-    {ok, idle, Data}.
-
-
-%% Helper function
-go_state_idle(State) ->
-    eggpd_connection:stop(State#peer_state.connection),
-    {next_state, idle, State#peer_state{connection=void}}.
+    io:format("--- PEER INIT ~p ---~n", [self()]),
+    {ok, _} = timer:apply_after(10000,
+				gen_fsm, send_event,
+				[self(), automatic_start]),
+    {ok, idle, #peer_state{peer=PeerConfig}}.
 
 %%
 %% States and their messages (RFC4271 8.2.2)
 %%
 idle(automatic_start, State) ->
-    io:format("Idle, about to change to connect~n"),
+    io:format("peer(~p): idle -> connect~n", [self()]),
     Con=eggpd_connection:start_link(State#peer_state.peer),
     eggpd_connection:connect(Con),
     State1 = State#peer_state{connection=Con},
     {next_state, connect, State1}.
     
-connect(manual_stop, State) ->
-    go_state_idle(State);
-
 %% DelayOpen not implemented
 %% TODO: what is the right event name for this?
 connect(connected, State) ->
+    io:format("peer(~p): connect -> open_sent~n", [self()]),
     eggpd_connection:send_open(State#peer_state.connection),
     {next_state, open_sent, State}.
 
 %% TODO: what is the right event name for this?
 open_sent({open, _Options}, State) ->
+    io:format("peer(~p): open_sent -> open_confirm~n", [self()]),
     eggpd_connection:send_keepalive(State#peer_state.connection),
     {next_state, open_confirm, State}.
 
-open_confirm(keepalive, State) ->
-    {next_state, established, State}.
+open_confirm(keepalive, Data) ->
+    io:format("peer(~p): open_confirm -> established~n", [self()]),
+    {next_state, established, Data}.
 
-established({notification, Data}, State) ->
-    io:format("Notification: ~p~n", [Data]),
-    go_state_idle(State);
+established({notification, Notification}, Data) ->
+    io:format("peer(~p): notification: ~p~n",
+	      [self(), Notification]),
+    {stop, notification, Data};
 
-established(keepalive, State) ->
-    %%io:format("PEER Keepalive~n"),
-    eggpd_connection:send_keepalive(State#peer_state.connection),
-    {next_state, established, State};
+established(keepalive, Data) ->
+    io:format("peer(~p): keepalive~n", [self()]),
+    eggpd_connection:send_keepalive(Data#peer_state.connection),
+    {next_state, established, Data};
 
-established({update, Data}, State) ->
-    io:format("Update: ~p~n", [Data]),
-    {next_state, established, State}.
+established({update,
+	     Update={withdraw, _Withdraw,
+		     pathattr, _Pathattr,
+		     info, _Info}}, Data) ->
+    io:format("peer(~p): update: ~p~n", [self(), Update]),
+    {next_state, established, Data}.
 
 % TODO: state active
 
@@ -103,7 +100,7 @@ print_info({Net, Len}) ->
 
 
 code_change(_OldVersion, State, Data, _Extra) ->
-    io:format("Code change: ~p ~p~n", [State, Data]),
+    io:format("peer(~p), Code change: ~p ~p~n", [self(), State, Data]),
     {ok, Data}.
 
 stop(Pid) ->
@@ -113,8 +110,5 @@ handle_event(stop, _StateName, StateData) ->
     {stop, normal, StateData}.
 
 terminate(Reason, State, Data) ->
-    io:format("PEER Terminate(~p, ~p, ~p)~n", [Reason, State, Data]),
-    ok.
-handle_info(Info, State, Data) ->
-    io:format("PEER Got info: ~p~n", [Info]),
-    go_state_idle(State).
+    io:format("peer(~p): terminate(~p, ~p, ~p)~n",
+	      [self(), Reason, State, Data]).

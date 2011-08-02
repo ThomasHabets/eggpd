@@ -26,8 +26,8 @@
 %%
 parse_open(OpenMsg, Peer) ->
     ?BGP_OPEN_FMT = OpenMsg,
-    io:format("Con BGP Ident: ~p~n", [_BGP_Identifier]),
-    _BGP_AS =:= Peer#peer.as,
+    io:format("con(~p): BGP Ident: ~p~n", [self(), _BGP_Identifier]),
+    _BGP_AS = Peer#peer.as,
     {todo, options, here}.
 
 %%
@@ -185,7 +185,7 @@ parse_update(Msg) ->
 %%
 %%
 %%
-parse_all_msgs(_Peerp, <<>>, Peer) ->
+parse_all_msgs(_Peerp, <<>>, _Peer) ->
     ok;
 
 parse_all_msgs(Peerp, Msg, Peer) ->
@@ -208,23 +208,25 @@ parse_all_msgs(Peerp, Msg, Peer) ->
 	    end
     end.
 
-parse_msg(Peerp, Msg, Peer) ->
+parse_msg(Parent, Msg, Peer) ->
     ?BGP_HEADER_FMT = Msg,
-    gen_fsm:send_event(Peerp, case _BGP_Head_Type of
-				  ?BGP_TYPE_OPEN ->
-				      {open, parse_open(Msg, Peer)};
-				  ?BGP_TYPE_KEEPALIVE ->
-				      keepalive;
-				  ?BGP_TYPE_UPDATE ->
-				      parse_update(Msg);
-				  ?BGP_TYPE_NOTIFICATION ->
-				      {notification, Msg};
-				  Other ->
-				      io:format("Unknown BGP msg type: ~p",
-						[Other]),
-				      {error, Other}
-			      end).
-    
+    io:format("con(~p): about to send event to ~p~n", [self(), Parent]),
+    gen_fsm:send_event(Parent,
+		       case _BGP_Head_Type of
+			   ?BGP_TYPE_OPEN ->
+			       {open, parse_open(Msg, Peer)};
+			   ?BGP_TYPE_KEEPALIVE ->
+			       keepalive;
+			   ?BGP_TYPE_UPDATE ->
+			       parse_update(Msg);
+			   ?BGP_TYPE_NOTIFICATION ->
+			       {notification, Msg};
+			   Other ->
+			       io:format("con(~p): Unknown BGP msg type: ~p",
+					 [self(), Other]),
+			       {error, Other}
+		       end).
+
 %%
 %%
 %%
@@ -357,17 +359,20 @@ announce_route(Con, Path, Route) ->
 %%
 %%
 state_idle(Parent, Peer) ->
-    io:format("connection> state_idle/2~n"),
+    io:format("con(~p): state_idle/2~n", [self()]),
     enter_state_idle(false, Parent, Peer).
 
 enter_state_idle(LSock, Peerp, Peer) ->
-    io:format("connection> entering idle~n"),
-    io:format("eggpd_connection> state_idle~n"),
+    io:format("con(~p): entering idle~n", [self()]),
+    io:format("con(~p): state_idle~n", [self()]),
     state_idle(LSock, Peerp, Peer).
 
 state_idle(LSock, Peerp, Peer) ->
-    io:format("connection> idle(~p, ~p, ~p)~n", [LSock, Peerp, Peer]),
+    io:format("con(~p): idle(~p, ~p, ~p)~n", [self(), LSock, Peerp, Peer]),
     receive
+	{Peerp, stop} ->
+	    exit(killed);
+
 	{Peerp, connect} ->
 	    R = gen_tcp:connect(Peer#peer.ip,
 				Peer#peer.port,
@@ -377,7 +382,8 @@ state_idle(LSock, Peerp, Peer) ->
 		{ok, Sock} ->
 		    enter_state_connected(LSock, Sock, Peerp, Peer);
 		Any ->
-		    io:format("connection> connect() failed: ~p~n", [Any]),
+		    io:format("con(~p): connect() failed: ~p~n",
+			      [self(), Any]),
 		    Peerp ! {self(), {error, {connect, timeout}}},
 		    state_idle(LSock, Peerp, Peer)
 	    end;
@@ -389,7 +395,7 @@ state_idle(LSock, Peerp, Peer) ->
 		{ok, LS1} ->
 		    state_idle(LS1, Peerp, Peer);
 		Any ->
-		    io:format("connection> listen() failed: ~p~n", [Any]),
+		    io:format("con(~p): listen() failed: ~p~n", [self(), Any]),
 		    state_idle(LSock, Peerp, Peer)
 	    end
     after 1000 ->
@@ -409,7 +415,7 @@ state_idle(LSock, Peerp, Peer) ->
 
 
 enter_state_connected(LSock, Sock, Parent, Peer) ->
-    io:format("Peerpc> state_connected~n"),
+    io:format("con(~p): state_connected~n", [self()]),
     gen_fsm:send_event(Parent, connected),
     put(tcp_buffer, <<>>),
     state_connected(LSock, Sock, Parent, Peer).
@@ -421,12 +427,12 @@ state_connected(LSock, Sock, Peerp, Peer) ->
 	    exit(killed);
 
 	{Peerp, open} ->
-	    io:format("con> Sending open~n"),
+	    io:format("con(~p): Sending open~n", [self()]),
 	    do_send_open(Sock, Peer),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
 	{Peerp, keepalive} ->
-	    io:format("con> Sending keepalive~n"),
+	    io:format("con(~p): Sending keepalive~n", [self()]),
 	    do_send_keepalive(Sock),
 	    state_connected(LSock, Sock, Peerp, Peer);
 
@@ -451,10 +457,11 @@ state_connected(LSock, Sock, Peerp, Peer) ->
 	    state_idle(LSock, Peerp, Peer);
 	    
 	Any ->
-	    io:format("state_connected got bogus msg ~p~n", [Any]),
+	    io:format("con(~p): state_connected got bogus msg ~p~n",
+		      [self(), Any]),
 	    state_connected(LSock, Sock, Peerp, Peer)
     end.
 
 start_link(Peer) ->
-    io:format("connection> spawning ~p...~n", [Peer]),
+    io:format("con(new): ~p spawning ~p...~n", [self(), Peer]),
     spawn_link(?MODULE, state_idle, [self(), Peer]).
