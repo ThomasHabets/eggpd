@@ -109,25 +109,23 @@ established({update,
     io:format("peer(~p): update: ~p~n", [self(), Update]),
     io:format("peer(~p): withdraw:~n", [self()]),
     print_info_block(Withdraw),
-    rib_withdraw_ipv4_routes(Withdraw),
+    rib_withdraw_ipv4_routes(Withdraw, todo),
     io:format("peer(~p): announce:~n", [self()]),
     print_info_block(Announce),
-    rib_add_ipv4_routes(Announce),
+    rib_add_ipv4_routes(Announce, todo),
     {next_state, established, Data}.
 
-rib_add_ipv4_routes([]) ->
+rib_add_ipv4_routes([], _Pathattr) ->
     ok;
-rib_add_ipv4_routes([H|T]) ->
-    {Net, Len} = H,
-    eggpd_rib:add_route({ipv4, Net, Len}),
-    rib_add_ipv4_routes(T).
+rib_add_ipv4_routes([Net|T], Pathattr) ->
+    eggpd_rib:add_route({ipv4, Net, Pathattr}),
+    rib_add_ipv4_routes(T, Pathattr).
 
-rib_withdraw_ipv4_routes([]) ->
+rib_withdraw_ipv4_routes([], _Pathattr) ->
     ok;
-rib_withdraw_ipv4_routes([H|T]) ->
-    {Net, Len} = H,
-    eggpd_rib:withdraw_route({ipv4, Net, Len}),
-    rib_withdraw_ipv4_routes(T).
+rib_withdraw_ipv4_routes([Net|T], Pathattr) ->
+    eggpd_rib:withdraw_route({ipv4, Net, Pathattr}),
+    rib_withdraw_ipv4_routes(T, Pathattr).
 
 
 %%
