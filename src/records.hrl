@@ -69,6 +69,12 @@
 		       _BGP_Identifier:32,
 		       _BGP_Opt_Parm_Len:8,
 		       _BGP_Rest/binary>>).
+
+-define(BGP_OPEN_PARM_FMT, <<_BGP_Open_Parm_Type:8,
+			     _BGP_Open_Parm_Len:8,
+			     _BGP_Open_Parm_Rest/binary>>).
+-define(BGP_OPEN_PARM_CAPABILITIES, 2).
+
 %% followed by BGP_Opt_Parm_Len bytes
 
 %% keepalive
@@ -109,6 +115,7 @@
 -define(BGP_PATHATTR_LOCAL_PREF, 5).
 -define(BGP_PATHATTR_ATOMIC_AGGREGATE, 6).
 -define(BGP_PATHATTR_AGGREGATOR, 7).
+-define(BGP_PATHATTR_MP_REACH_NLRI, 14).
 
 -define(BGP_PATHATTR_FLAG_OPTIONAL, 128).
 -define(BGP_PATHATTR_FLAG_TRANSITIVE, 64).

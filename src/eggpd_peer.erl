@@ -29,7 +29,7 @@
 
 	 %% States
 	 idle/2,
-	 active/2,
+	 %% active/2,
 	 connect/2,
 	 open_sent/2,
 	 open_confirm/2,
@@ -82,8 +82,9 @@ connect(connected, State) ->
     {next_state, open_sent, State}.
 
 %% TODO: what is the right event name for this?
-open_sent({open, _Options}, State) ->
+open_sent({open, Options}, State) ->
     io:format("peer(~p): open_sent -> open_confirm~n", [self()]),
+    io:format("peer(~p): open options: ~p~n", [self(), Options]),
     eggpd_connection:send_keepalive(State#peer_state.connection),
     {next_state, open_confirm, State}.
 

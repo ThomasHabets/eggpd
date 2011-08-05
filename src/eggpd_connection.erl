@@ -42,9 +42,33 @@
 -include("records.hrl").
 
 
-%%
-%% States
-%%
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<1,4,0,1,0,1>>) ->
+    bgp_option_multiprotocol_ipv4;
+
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<1,4,0,2,0,1>>) ->
+    bgp_option_multiprotocol_ipv6;
+
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<128,0>>) ->
+    bgp_option_route_refresh_128;
+
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<2,0>>) ->
+    bgp_option_route_refresh_2;
+
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<65,4,AS:32>>) ->
+    {bgp_option_32bit_as, AS}.
+
+parse_open_parameters(Data) ->
+    parse_open_parameters(Data, []).
+
+parse_open_parameters(<<>>, Opts) ->
+    Opts;
+parse_open_parameters(Data, Opts) ->
+    ?BGP_OPEN_PARM_FMT = Data,
+    <<OptData:_BGP_Open_Parm_Len/binary, Rest/binary>> = _BGP_Open_Parm_Rest,
+    Opt = parse_open_parameter(_BGP_Open_Parm_Type,
+			       _BGP_Open_Parm_Len,
+			       OptData),
+    parse_open_parameters(Rest, [Opt | Opts]).
 
 %%
 %%
@@ -53,7 +77,11 @@ parse_open(OpenMsg, Peer) ->
     ?BGP_OPEN_FMT = OpenMsg,
     io:format("con(~p): BGP Ident: ~p~n", [self(), _BGP_Identifier]),
     _BGP_AS = Peer#peer.as,
-    {todo, options, here}.
+    %% TODO: check that _BGP_Opt_Parm_Len is correct
+    {as, _BGP_AS,
+     holdtime, _BGP_Holdtime,
+     identifier, _BGP_Identifier,
+     parameters, parse_open_parameters(_BGP_Rest)}.
 
 %%
 %%
@@ -126,9 +154,9 @@ parse_update_pathattr_aggregator(Bin) ->
 %%
 %%
 %%
-parse_update_pathattr(<<>>) ->
+parse_update_pathattrs(<<>>) ->
     [];
-parse_update_pathattr(Pathattr) ->
+parse_update_pathattrs(Pathattr) ->
     %%io:format('EGGPD_CONNECTION', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
      _F_Transitive:1,
@@ -165,9 +193,9 @@ parse_update_pathattr(Pathattr) ->
 		 ?BGP_PATHATTR_AGGREGATOR -> 
 		     parse_update_pathattr_aggregator(Value);
 		 Any ->
-		     io:format("Unknown path attribute ~p", [Any])
+		     io:format("Unknown path attribute ~p~n", [Any])
     end,
-    [Parsed|parse_update_pathattr(R3)].
+    [Parsed|parse_update_pathattrs(R3)].
 
 
 %%
@@ -200,7 +228,7 @@ parse_update(Msg) ->
 
     %% Parse the three field infos
     Withdraw = parse_update_withdraw(_BGP_Update_Withdraw),
-    Pathattr = parse_update_pathattr(_BGP_Update_Pathattr),
+    Pathattr = parse_update_pathattrs(_BGP_Update_Pathattr),
     Info = parse_update_info(_BGP_Update_Info),
 
     {update, {withdraw, Withdraw,

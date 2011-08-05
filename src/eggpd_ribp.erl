@@ -25,14 +25,18 @@
 %% API
 -export([start_link/0,
 	 add_route/1,
+	 get_rib/0,
 	 withdraw_route/1,
 	 fail/0,
-	 stop/0
-	]).
+	 stop/0,
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3]).
+	 %% gen_server callbacks
+	 init/1,
+	 handle_call/3,
+	 handle_cast/2,
+	 handle_info/2,
+	 terminate/2,
+	 code_change/3]).
 
 
 -record(state, {}).
