@@ -111,60 +111,81 @@ parse_int_array(Size, Bin) ->
 %%
 %%
 %%
-parse_update_pathattr_as_path(Val) ->
-    %%    io:format('EGGPD_CONNECTION', ["parse_update_pathattr_as_path: ~p", Val]),
+parse_update_pathattr(?BGP_PATHATTR_AS_PATH, Val) ->
     <<Type1:8, _Len:8, Rest/binary>> = Val,
     Type2 = case Type1 of
 		   1 -> as_set;
 		   2 -> as_sequence
 	       end,
     {as_path, {Type2,
-	       parse_int_array(16, Rest)}}.
+	       parse_int_array(16, Rest)}};
 
 %%
 %%
 %%
-parse_update_pathattr_next_hop(Bin) ->
+parse_update_pathattr(?BGP_PATHATTR_NEXT_HOP, Bin) ->
     <<A:8,B:8,C:8,D:8>> = Bin,
-    {next_hop, (((256 * A + B) * 256 + C) * 256 + D)}.
+    {next_hop, (((256 * A + B) * 256 + C) * 256 + D)};
 %%
 %%
 %%
-parse_update_pathattr_multi_exit_disc(Bin) ->
+parse_update_pathattr(?BGP_PATHATTR_MULTI_EXIT_DISC, Bin) ->
     <<MED:32>> = Bin,
-    {multi_exit_disc, MED}.
+    {multi_exit_disc, MED};
 %%
 %%
 %%
-parse_update_pathattr_local_pref(Bin) ->
+parse_update_pathattr(?BGP_PATHATTR_LOCAL_PREF, Bin) ->
     <<L:32>> = Bin,
-    {local_pref, L}.
+    {local_pref, L};
 %%
 %%
 %%
-parse_update_pathattr_atomic_aggregate(_Bin) ->
-    atomic_aggregate.
-%%
-%%
-%%
-parse_update_pathattr_aggregator(Bin) ->
-    <<AS:16, IP:32>> = Bin,
-    {aggregator, AS, IP}.
+parse_update_pathattr(?BGP_PATHATTR_ATOMIC_AGGREGATE, _Bin) ->
+    atomic_aggregate;
 
 %%
 %%
 %%
-parse_update_pathattrs(<<>>) ->
-    [];
-parse_update_pathattrs(Pathattr) ->
+parse_update_pathattr(?BGP_PATHATTR_AGGREGATOR, Bin) ->
+    <<AS:16, IP:32>> = Bin,
+    {aggregator, AS, IP};
+
+%%
+%%
+%% IPv6 Unicast Nexthop <nexthop> PoAttach Prefixlen <net>
+%% 0002      16      01                 00       128
+parse_update_pathattr(?BGP_PATHATTR_MP_REACH_NLRI,
+		      <<0,2,1,16,Addr:16/binary,0,Len,Net/binary>>) ->
+    %% FIXME: canonicalize the address size
+    {nlri_ipv6, Addr, Net, Len};
+
+%%
+%%
+%%
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<0>>) -> {origin, igp};
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<1>>) -> {origin, egp};
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<2>>) -> {origin, incomplete};
+
+parse_update_pathattr(PathAttr, Value) ->
+    io:format("Unknown path attribute ~p = ~p~n", [PathAttr, Value]),
+    {unknown, PathAttr, Value}.
+
+parse_update_pathattrs(Data) ->
+    parse_update_pathattrs(Data, []).
+
+parse_update_pathattrs(<<>>, Attrs) ->
+    Attrs;
+
+parse_update_pathattrs(Pathattr, Attrs) ->
     %%io:format('EGGPD_CONNECTION', ["pathattr parse: ~p", Pathattr]),
     <<_F_Optional:1,
-     _F_Transitive:1,
-     _F_Partial:1,
-     _F_Extended:1,
-     _F_OtherFlags:4,
-     Code:8,
-     R1/binary>> = Pathattr,
+      _F_Transitive:1,
+      _F_Partial:1,
+      _F_Extended:1,
+      _F_OtherFlags:4,
+      Code:8,
+      R1/binary>> = Pathattr,
     case _F_Extended of
 	0 ->
 	    <<Len:8, R2/binary>> = R1;
@@ -172,30 +193,8 @@ parse_update_pathattrs(Pathattr) ->
 	    <<Len:16, R2/binary>> = R1
     end,
     <<Value:Len/binary, R3/binary>> = R2,
-    Parsed = case Code of
-		 ?BGP_PATHATTR_ORIGIN -> 
-		     <<V:8>> = Value,
-		     {origin, case V of
-				  0 -> igp;
-				  1 -> egp;
-				  2 -> incomplete
-			      end};
-		 ?BGP_PATHATTR_AS_PATH ->
-		     parse_update_pathattr_as_path(Value);
-		 ?BGP_PATHATTR_NEXT_HOP -> 
-		     parse_update_pathattr_next_hop(Value);
-		 ?BGP_PATHATTR_MULTI_EXIT_DISC -> 
-		     parse_update_pathattr_multi_exit_disc(Value);
-		 ?BGP_PATHATTR_LOCAL_PREF -> 
-		     parse_update_pathattr_local_pref(Value);
-		 ?BGP_PATHATTR_ATOMIC_AGGREGATE -> 
-		     parse_update_pathattr_atomic_aggregate(Value);
-		 ?BGP_PATHATTR_AGGREGATOR -> 
-		     parse_update_pathattr_aggregator(Value);
-		 Any ->
-		     io:format("Unknown path attribute ~p~n", [Any])
-    end,
-    [Parsed|parse_update_pathattrs(R3)].
+    Parsed = parse_update_pathattr(Code, Value),
+    parse_update_pathattrs(R3, [Parsed|Attrs]).
 
 
 %%
