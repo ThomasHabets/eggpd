@@ -109,9 +109,25 @@ established({update,
     io:format("peer(~p): update: ~p~n", [self(), Update]),
     io:format("peer(~p): withdraw:~n", [self()]),
     print_info_block(Withdraw),
+    rib_withdraw_ipv4_routes(Withdraw),
     io:format("peer(~p): announce:~n", [self()]),
     print_info_block(Announce),
+    rib_add_ipv4_routes(Announce),
     {next_state, established, Data}.
+
+rib_add_ipv4_routes([]) ->
+    ok;
+rib_add_ipv4_routes([H|T]) ->
+    {Net, Len} = H,
+    eggpd_rib:add_route({ipv4, Net, Len}),
+    rib_add_ipv4_routes(T).
+
+rib_withdraw_ipv4_routes([]) ->
+    ok;
+rib_withdraw_ipv4_routes([H|T]) ->
+    {Net, Len} = H,
+    eggpd_rib:withdraw_route({ipv4, Net, Len}),
+    rib_withdraw_ipv4_routes(T).
 
 
 %%

@@ -38,8 +38,7 @@
 	 terminate/2,
 	 code_change/3]).
 
-
--record(state, {}).
+-include("records.hrl").
 
 %%====================================================================
 %% API
@@ -52,7 +51,7 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-add_route(Route)      -> gen_server:call(?MODULE, {add_route, Route}).
+add_route(Route) -> gen_server:call(?MODULE, {add_route, Route}).
 withdraw_route(Route) -> gen_server:call(?MODULE, {withdraw_route, Route}).
 get_rib()             -> gen_server:call(?MODULE, get_rib).
 fail()                -> gen_server:call(?MODULE, fail).
@@ -70,7 +69,7 @@ stop()                -> gen_server:call(?MODULE, stop).
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, #state{}}.
+    {ok, #rib_state{}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -81,13 +80,22 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({add_route, Route}, _From, State) ->
+handle_call({add_route, {AF, Route, Nexthop}}, _From, State) ->
     io:format("RIBP> add route: ~p~n", [Route]),
-    {reply, ok, State};
+    NewTables = dict:append(AF,
+			    {Route, Nexthop},
+			    State#rib_state.tables),
+    {reply, ok, State#rib_state{tables=NewTables}};
 
-handle_call({withdraw_route, Route}, _From, State) ->
-    io:format("RIBP> withdraw route: ~p~n", [Route]),
-    {reply, ok, State};
+handle_call({withdraw_route, {AF, Route, Nexthop}}, _From, State) ->
+    io:format("RIBP> withdraw route: ~p~n", [{Route, Nexthop}]),
+    NewTables = dict:update(AF,
+			    fun(Routes) ->
+				    io:format("Routes: ~p~n", [Routes]),
+				    Routes -- [{Route, Nexthop}]
+			    end,
+			    State#rib_state.tables),
+    {reply, ok, State#rib_state{tables=NewTables}};
     
 handle_call(stop, _From, State) ->
     io:format("RIBP> stop~n"),

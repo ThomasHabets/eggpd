@@ -37,6 +37,10 @@
 	  peer
 	  }).
 
+-record(rib_state, {
+	  tables = dict:new()
+	 }).
+
 -define(BGP_MARKER, 16#ffffffff).
 -define(BGP_TYPE_OPEN, 1).
 -define(BGP_TYPE_UPDATE, 2).
