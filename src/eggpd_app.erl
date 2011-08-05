@@ -1,20 +1,24 @@
 %%%-------------------------------------------------------------------
 %%% File    : eggpd_app.erl
-%%% Author  : Thomas Habets <thomas@habets.pp.se>
+%%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description : 
+%%%   Code for starting up/shutting down eggpd.
 %%%
-%%% Created :  24 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
+%%% Copyright :
+%%% Copyright 2008,2011 Thomas Habets <thomas@habets.se>
+%%%
+%%% Licensed under the Apache License, Version 2.0 (the "License");
+%%% you may not use this file except in compliance with the License.
+%%% You may obtain a copy of the License at
+%%%
+%%%       http://www.apache.org/licenses/LICENSE-2.0
+%%%
+%%% Unless required by applicable law or agreed to in writing, software
+%%% distributed under the License is distributed on an "AS IS" BASIS,
+%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%% See the License for the specific language governing permissions and
+%%% limitations under the License.
 %%%-------------------------------------------------------------------
-%%
-%% 1> application:load(eggpd).
-%% ok
-%% 2> application:start(eggpd).
-%% ok
-%% 3> ribp:add_route(123).
-%% RIBP> add route: 123
-%% ok
-%% 4> appmon:start().
-
 -module(eggpd_app).
 -behaviour(application).
 -export([start/2, stop/1]).
@@ -29,7 +33,6 @@
 %% OTP design principles as a supervision tree, this means starting the
 %% top supervisor of the tree.
 %%--------------------------------------------------------------------
-
 start(_Type, StartArgs) ->
     eggpd_sup:start_link(StartArgs).
 
@@ -39,6 +42,5 @@ start(_Type, StartArgs) ->
 %% has stopped. It is intended to be the opposite of Module:start/2 and
 %% should do any necessary cleaning up. The return value is ignored. 
 %%--------------------------------------------------------------------
-
 stop(_State) ->
     ok.

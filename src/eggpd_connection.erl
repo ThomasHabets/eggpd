@@ -1,18 +1,44 @@
 %%%-------------------------------------------------------------------
 %%% File    : eggpd_connection.erl
 %%% Author  : Thomas Habets <thomas@habets.se>
-%%% Description : This is the only impure module (so far) in eggpd.
+%%% Description :
+%%%   Impure module.
+%%%   Handles TCP connection and parses BGP messages and turns them into
+%%%   gen_fsm:send_event/2 into eggpd_peer.
 %%%
-%%% Created :  26 Jul 2008,2011 by Thomas Habets <thomas@habets.se>
+%%%   TODO: Rewrite as gen_fsm or gen_server.
+%%%
+%%% Copyright :
+%%% Copyright 2008,2011 Thomas Habets <thomas@habets.se>
+%%%
+%%% Licensed under the Apache License, Version 2.0 (the "License");
+%%% you may not use this file except in compliance with the License.
+%%% You may obtain a copy of the License at
+%%%
+%%%       http://www.apache.org/licenses/LICENSE-2.0
+%%%
+%%% Unless required by applicable law or agreed to in writing, software
+%%% distributed under the License is distributed on an "AS IS" BASIS,
+%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%% See the License for the specific language governing permissions and
+%%% limitations under the License.
 %%%-------------------------------------------------------------------
 -module(eggpd_connection).
 
-%%
-%% API
-%%
--export([start_link/1]).
-%% Internal
+%% Functions called by startup/tairdown
+-export([start_link/1, stop/1, state_idle/2]).
 
+%% API
+-export([announce_route/3,
+	 connect/1,
+	 listen/1,
+	 send_keepalive/1,
+	 send_open/1]).
+
+%% States
+-export([state_idle/3]).
+
+%% Internal
 -include("records.hrl").
 
 
@@ -407,7 +433,7 @@ state_idle(LSock, Peerp, Peer) ->
 			{ok, Sock} ->
 			    enter_state_connected(LSock, Sock, Peerp, Peer);
 			_ ->
-			    state_idle(LSock, Peerp, Peer)
+			    ?MODULE:state_idle(LSock, Peerp, Peer)
 		    end
 	    end
     end.

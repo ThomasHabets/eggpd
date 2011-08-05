@@ -1,36 +1,50 @@
 %%%-------------------------------------------------------------------
 %%% File    : eggpd_peer.erl
-%%% Author  : Thomas Habets <thomas@habets.pp.se>
+%%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description : 
-%%%   Test with eggpd_peer:test().
+%%%   Peer state machine.
 %%%
-%%% Created :  24 Jul 2008 by Thomas Habets <thomas@habets.pp.se>
+%%% Copyright :
+%%% Copyright 2008,2011 Thomas Habets <thomas@habets.se>
+%%%
+%%% Licensed under the Apache License, Version 2.0 (the "License");
+%%% you may not use this file except in compliance with the License.
+%%% You may obtain a copy of the License at
+%%%
+%%%       http://www.apache.org/licenses/LICENSE-2.0
+%%%
+%%% Unless required by applicable law or agreed to in writing, software
+%%% distributed under the License is distributed on an "AS IS" BASIS,
+%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%% See the License for the specific language governing permissions and
+%%% limitations under the License.
 %%%-------------------------------------------------------------------
 -module(eggpd_peer).
 -behaviour(gen_fsm).
-%% API
--compile(export_all).
 
--export([
-	 init/1,
+%% Startup/tairdown/codechange
+-export([init/1,
 	 start_link/1,
-	 code_change/4,
+	 terminate/3,
+
+	 %% States
+	 idle/2,
+	 active/2,
+	 connect/2,
+	 open_sent/2,
+	 open_confirm/2,
+	 established/2,
+
+	 %% Callbacks
 	 handle_event/3,
-	 %% handle_info/3,   % Ignore warning about missing callback
-	 handle_sync_event/4
-	 %% terminate/3      % Ignore warning about missing callback
-	]).
+	 handle_sync_event/4]).
+
 -include("records.hrl").
 
-%-record(state, {}).
+%%--------------------------------------------------------------------
+%% Startup/tairdown/codechange
 
-% debug
-    
-handle_sync_event(get_event, _From, State, Data) ->
-    io:format("peer(~p): ------> Sync event~n", [self()]),
-    {reply, {State, Data}, State, Data}.
-
-%% API
+%
 start_link(Peer) ->
     PeerConfig = #peer{ip=Peer, as=65020, localas=65021},
     gen_fsm:start_link(?MODULE, [PeerConfig], []).
@@ -41,6 +55,14 @@ init([PeerConfig]) ->
 				gen_fsm, send_event,
 				[self(), automatic_start]),
     {ok, idle, #peer_state{peer=PeerConfig}}.
+
+%% Callbacks
+handle_event(stop, _StateName, StateData) ->
+    {stop, normal, StateData}.
+
+handle_sync_event(get_event, _From, State, Data) ->
+    io:format("peer(~p): ------> Sync event~n", [self()]),
+    {reply, {State, Data}, State, Data}.
 
 %%
 %% States and their messages (RFC4271 8.2.2)
@@ -90,7 +112,6 @@ established({update,
     print_info_block(Announce),
     {next_state, established, Data}.
 
-% TODO: state active
 
 %%
 %%
@@ -109,15 +130,8 @@ print_info({Net, Len}) ->
     io:format("peer(~p):    ~p.~p.~p.~p/~p~n", [self(), A,B,C,D,Len]).
 
 
-code_change(_OldVersion, State, Data, _Extra) ->
-    io:format("peer(~p), Code change: ~p ~p~n", [self(), State, Data]),
-    {ok, Data}.
-
 stop(Pid) ->
     gen_fsm:send_all_state_event(Pid, stop).
-
-handle_event(stop, _StateName, StateData) ->
-    {stop, normal, StateData}.
 
 terminate(Reason, State, Data) ->
     io:format("peer(~p): terminate(~p, ~p, ~p)~n",

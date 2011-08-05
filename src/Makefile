@@ -3,8 +3,8 @@ TARGETS=eggpd_app.beam \
 	eggpd_sup.beam \
 	eggpd_peer_sup.beam \
 	eggpd.beam \
-	fibp.beam \
-	ribp.beam \
+	eggpd_fibp.beam \
+	eggpd_ribp.beam \
 	eggpd_peer.beam \
 	eggpd_connection.beam \
 	routemon.beam
@@ -12,7 +12,7 @@ TARGETS=eggpd_app.beam \
 .SUFFIXES: .erl .beam
 
 .erl.beam:
-	erlc +debug_info $<
+	erlc $<
 
 all:  $(TARGETS)
 
