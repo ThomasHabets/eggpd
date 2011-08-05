@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% File    : eggpd_fibp.erl
+%%% File    : eggpd_fib.erl
 %%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description : 
 %%%   Interact with routing table. Currently doesn't do anything.
@@ -19,7 +19,7 @@
 %%% See the License for the specific language governing permissions and
 %%% limitations under the License.
 %%%-------------------------------------------------------------------
--module(eggpd_fibp).
+-module(eggpd_fib).
 
 -behaviour(gen_server).
 

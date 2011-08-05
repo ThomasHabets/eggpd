@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% File    : eggpd_ribp.erl
+%%% File    : eggpd_rib.erl
 %%% Author  : Thomas Habets <thomas@habets.se>
 %%% Description : 
 %%%   RIB process.
@@ -19,7 +19,7 @@
 %%% See the License for the specific language governing permissions and
 %%% limitations under the License.
 %%%-------------------------------------------------------------------
--module(eggpd_ribp).
+-module(eggpd_rib).
 -behaviour(gen_server).
 
 %% API

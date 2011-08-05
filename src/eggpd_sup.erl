@@ -37,14 +37,14 @@ start_link(Args) ->
 
 %% Init supervisor. What subprocesses to monitor
 init([]) ->
-    Processes = [{eggpd_ribp,
-		  {eggpd_ribp, start_link, []},
+    Processes = [{eggpd_rib,
+		  {eggpd_rib, start_link, []},
 		  permanent,
 		  10000,                     % Shutdown time
 		  worker,
 		  dynamic},
-		 {eggpd_fibp,
-		  {eggpd_fibp, start_link, []},
+		 {eggpd_fib,
+		  {eggpd_fib, start_link, []},
 		  permanent, 
 		  10000, 
 		  worker, 
