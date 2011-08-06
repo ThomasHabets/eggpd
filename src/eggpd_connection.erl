@@ -395,58 +395,49 @@ array_to_binary(Size, [H|T]) ->
 %%
 %% Description:
 %% Convert pathattr structures to binary.
-%%
-%% TODO:
-%% * Convert huge case-statement to a more erlangy way.
 %%--------------------------------------------------------------------
-pathattr_factory([]) ->
-    <<>>;
-pathattr_factory([{K,V}|Pathattrs]) ->
-    Bin = case K of
-	      origin ->
-		  T = case V of
-			  igp ->  0;
-			  egp ->  1;
-			  incomplete -> 2
-		      end,
-		  <<
-		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
-		   ?BGP_PATHATTR_ORIGIN:8,
-		   1:8,                                % len
-		   T:8>>;
-	      as_path ->
-		  {ASType1, ASP} = V,
-		  ASType2 = case ASType1 of
-				as_sequence -> 
-				    ?BGP_PATHATTR_AS_PATH_SEQUENTIAL;
-				as_set -> 
-				    ?BGP_PATHATTR_AS_PATH_SET
-			    end,
-		  L = length(ASP),
-		  TotL = 2 + L * 2,
-		  R = array_to_binary(16, ASP),
-		  <<
-		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
-		   ?BGP_PATHATTR_AS_PATH:8,
-		   TotL:8,                             % attr len
-		   ASType2:8,
-		   L:8,                                % Path lenght
-		   R/binary>>;
-	      next_hop ->
-		  <<
-		   ?BGP_PATHATTR_FLAG_TRANSITIVE:8,
-		   ?BGP_PATHATTR_NEXT_HOP:8,
-		   4:8,                                % addrlen
-		   V:32>>;
-	      multi_exit_disc ->
-		  <<
-		   ?BGP_PATHATTR_FLAG_OPTIONAL:8,
-		   ?BGP_PATHATTR_MULTI_EXIT_DISC:8,
-		   4:8,                                % Val len
-		   V:32>>
-		      end,
-    Rest = pathattr_factory(Pathattrs),
-    <<Bin/binary, Rest/binary>>.
+pathattr_factory(Attrs) ->
+    erlang:list_to_binary(fun pathattr_factory_entry/1, Attrs).
+
+pathattr_factory_entry({origin, V}) ->
+    Origin = case V of
+		 igp ->  ?ORIGIN_IGP;
+		 egp ->  ?ORIGIN_EGP;
+		 incomplete -> ?ORIGIN_INCOMPLETE
+	     end,
+    <<?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+      ?BGP_PATHATTR_ORIGIN:8,
+      1:8,                                % len
+      Origin:8>>;
+
+pathattr_factory_entry({as_path, {ASType1, ASP}}) ->
+    ASType2 = case ASType1 of
+		  as_sequence ->
+		      ?BGP_PATHATTR_AS_PATH_SEQUENTIAL;
+		  as_set ->
+		      ?BGP_PATHATTR_AS_PATH_SET
+	      end,
+    L = length(ASP),
+    TotL = 2 + L * 2,
+    R = array_to_binary(16, ASP),
+    <<?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+      ?BGP_PATHATTR_AS_PATH:8,
+      TotL:8,                             % attr len
+      ASType2:8,
+      L:8,                                % Path lenght
+      R/binary>>;
+
+pathattr_factory_entry({next_hop, V}) ->
+    <<?BGP_PATHATTR_FLAG_TRANSITIVE:8,
+      ?BGP_PATHATTR_NEXT_HOP:8,
+      4:8,                                % addrlen
+      V:32>>;
+
+pathattr_factory_entry({multi_exit_disc, V}) ->
+    <<?BGP_PATHATTR_FLAG_OPTIONAL:8,
+      ?BGP_PATHATTR_MULTI_EXIT_DISC:8,
+      4:8,                                % Val len
+      V:32>>.
 		  
 %%
 %% API
