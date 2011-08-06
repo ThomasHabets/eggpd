@@ -345,13 +345,15 @@ do_send_open(Sock, Peer) ->
 
     
 %%--------------------------------------------------------------------
-%% Function: do_announce_route(Sock, Pathattr, Nets) -> ignored
-%%
+%% Function: do_announce_route(Sock, Path, Nets) -> ignored
+%%   Path: List of ASs
+%%   Nets
 %% Description:
 %%--------------------------------------------------------------------
 do_announce_route(_Sock, _Path, []) ->
     void;
 
+%% TODO: this function only works for /32s, or possibly /8, /16 and /24 too
 do_announce_route(Sock, Path, [OneRoute|Routes]) ->
     %% Info
     {Net,Plen} = OneRoute,
@@ -397,7 +399,7 @@ array_to_binary(Size, [H|T]) ->
 %% Convert pathattr structures to binary.
 %%--------------------------------------------------------------------
 pathattr_factory(Attrs) ->
-    erlang:list_to_binary(fun pathattr_factory_entry/1, Attrs).
+    list_to_binary(lists:map(fun pathattr_factory_entry/1, Attrs)).
 
 pathattr_factory_entry({origin, V}) ->
     Origin = case V of
@@ -538,6 +540,7 @@ state_connected(LSock, Sock, Parent, Peer) ->
 	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
 	{Parent, {announce, Path, Route}} ->
+	    io:format("con(~p): announce ~p ~p~n", [self(), Path, Route]),
 	    do_announce_route(Sock, Path, Route),
 	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 

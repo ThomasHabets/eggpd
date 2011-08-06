@@ -1,0 +1,29 @@
+Links
+-----
+http://www.ietf.org/rfc/rfc4271.txt
+http://en.wikipedia.org/wiki/Border_Gateway_Protocol
+
+
+Cut-and-paste stuff
+-------------------
+lc([eggpd_peer]),ReloadAll().
+
+After startup, set up a peer:
+  {ok,P}=eggpd_peer_sup:add_peer("192.168.42.4").
+
+Announce two nets:
+  gen_fsm:send_event(P, {send_announce,
+                        [{as_path, {as_sequence, [1,2,3]}},
+                         {next_hop, 16#01010101},
+                         {origin, igp}
+                        ],
+                        [{0,32},
+                         {1,32}]}).
+
+
+f(S). {ok,{_, S}} = eggpd_rib:get_rib(), dict:fetch(ipv4, S).  
+
+TODO
+----
+* should each peer get its own sup, and kill its sup (thereby killing
+  its own state)?

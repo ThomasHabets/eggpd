@@ -102,6 +102,12 @@ established(keepalive, Data) ->
     eggpd_connection:send_keepalive(Data#peer_state.connection),
     {next_state, established, Data};
 
+established({send_announce, Path, Routes}, Data) ->
+    eggpd_connection:announce_route(Data#peer_state.connection,
+				    Path,
+				    Routes),
+    {next_state, established, Data};
+
 established({update,
 	     Update={withdraw, Withdraw,
 		     pathattr, _Pathattr,
