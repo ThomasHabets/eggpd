@@ -36,156 +36,193 @@
 	 send_open/1]).
 
 %% States
--export([state_idle/3]).
+-export([state_idle/3,
+	 state_connected/4]).
 
 %% Internal
 -include("records.hrl").
 
-
-parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<1,4,0,1,0,1>>) ->
+%%--------------------------------------------------------------------
+%% Function: parse_open_parameter(Type, Len, Data) -> parm_description
+%%
+%% Description:
+%% Create OPEN parameter descriptions from raw data.
+%%
+%% References:
+%% RFC2842 - Capabilities
+%% RFC2918 - Route refresh
+%% RFC4893 - 32bit AS
+%%--------------------------------------------------------------------
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES,
+		     <<?CAP_MP_EXT,
+		       4,             % Len
+		       0, 1,          % IPv4
+		       0,             % Reserved
+		       1              % Unicast
+		     >>) ->
     bgp_option_multiprotocol_ipv4;
 
-parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<1,4,0,2,0,1>>) ->
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES,
+		     <<?CAP_MP_EXT,
+		       4,             % Len
+		       0, 2,          % IPv6
+		       0,             % Reserved
+		       1              % Unicast
+		     >>) ->
     bgp_option_multiprotocol_ipv6;
 
-parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<128,0>>) ->
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES,
+		     <<?CAP_ROUTE_REFRESH,
+		       0              % Len
+		     >>) ->
+    bgp_option_route_refresh;
+
+%% TODO: what is cap 128 exactly? How is it different from 2?
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES,
+		     <<?CAP_ROUTE_REFRESH_128,
+		       0              % Len
+		     >>) ->
     bgp_option_route_refresh_128;
 
-parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<2,0>>) ->
-    bgp_option_route_refresh_2;
-
-parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES, _, <<65,4,AS:32>>) ->
+parse_open_parameter(?BGP_OPEN_PARM_CAPABILITIES,
+		     <<?CAP_32BIT_AS,
+		       4,             % Len
+		       AS:32>>) ->
     {bgp_option_32bit_as, AS}.
 
+%%--------------------------------------------------------------------
+%% Function: parse_open_parameters(OPENData) -> [parm_description, ...]
+%%
+%% Description:
+%% Given OPEN parameters as a binary return a list of parsed parameters.
+%%--------------------------------------------------------------------
 parse_open_parameters(Data) ->
     parse_open_parameters(Data, []).
 
 parse_open_parameters(<<>>, Opts) ->
     Opts;
+
 parse_open_parameters(Data, Opts) ->
     ?BGP_OPEN_PARM_FMT = Data,
     <<OptData:_BGP_Open_Parm_Len/binary, Rest/binary>> = _BGP_Open_Parm_Rest,
     Opt = parse_open_parameter(_BGP_Open_Parm_Type,
-			       _BGP_Open_Parm_Len,
 			       OptData),
     parse_open_parameters(Rest, [Opt | Opts]).
 
+%%--------------------------------------------------------------------
+%% Function: parse_open(OpenMsg, Peer) ->
+%%             {as, AS,
+%%              holdtime, Holdtime
+%%              identifier, Identifier,
+%%              parameters, ParameterList
+%%             }
 %%
-%%
-%%
+%% Description:
+%% Convert an OPEN message from raw binary to parsed structure.
+%%--------------------------------------------------------------------
 parse_open(OpenMsg, Peer) ->
     ?BGP_OPEN_FMT = OpenMsg,
     io:format("con(~p): BGP Ident: ~p~n", [self(), _BGP_Identifier]),
     _BGP_AS = Peer#peer.as,
-    %% TODO: check that _BGP_Opt_Parm_Len is correct
+    _BGP_Opt_Parm_Len = size(_BGP_Rest),
     {as, _BGP_AS,
      holdtime, _BGP_Holdtime,
      identifier, _BGP_Identifier,
      parameters, parse_open_parameters(_BGP_Rest)}.
 
+%%--------------------------------------------------------------------
+%% Function: parse_int_array(Size, Data) -> [n, m, ...]
 %%
-%%
-%%
-parse_update_withdraw(<<>>) ->
-    [];
-parse_update_withdraw(Withdraw) ->
-    %io:format('EGGPD_CONNECTION', ["blaha: ~p", Withdraw]),
-    <<Len:8, R1/binary>> = Withdraw,
-    GLen = (8-(Len rem 8)) rem 8,
-    %io:format('EGGPD_CONNECTION', ["paaarse ~p ~p", Len, GLen]),
-    <<Prefix1:Len,
-     _Garbage:GLen,
-     R2/binary>> = R1,
-    Prefix2 = Prefix1 bsl (32-Len),
-    [{Prefix2, Len}|parse_update_info(R2)].
+%% Description:
+%% Extract a list of 'Size'-bit ints from 'Data'.
+%%--------------------------------------------------------------------
+parse_int_array(Size, Data) ->
+    parse_int_array(Size, Data, []).
 
-%%
-%%
-%%
-parse_int_array(_Size, <<>>) ->
-    [];
-parse_int_array(Size, Bin) ->
+parse_int_array(_Size, <<>>, Arr) ->
+    lists:reverse(Arr);
+
+parse_int_array(Size, Bin, Arr) ->
     <<D:Size, Rest/binary>> = Bin,
-    [D|parse_int_array(Size, Rest)].
+    parse_int_array(Size, Rest, [D|Arr]).
 
+%%--------------------------------------------------------------------
+%% Function: parse_update_pathattr(Type, Binary) -> path_attr_spec
 %%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_AS_PATH, Val) ->
-    <<Type1:8, _Len:8, Rest/binary>> = Val,
-    Type2 = case Type1 of
-		   1 -> as_set;
-		   2 -> as_sequence
-	       end,
-    {as_path, {Type2,
-	       parse_int_array(16, Rest)}};
+%% Description:
+%% Convert a path attribute binary into a parsed structure.
+%%--------------------------------------------------------------------
+parse_update_pathattr(?BGP_PATHATTR_AS_PATH,
+		      <<?AS_SET,
+			_Len:8,
+			Rest/binary>>) ->
+    {as_path, {as_set, parse_int_array(16, Rest)}};
 
-%%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_NEXT_HOP, Bin) ->
-    <<A:8,B:8,C:8,D:8>> = Bin,
+parse_update_pathattr(?BGP_PATHATTR_AS_PATH,
+		      <<?AS_SEQUENCE,
+			_Len:8,
+			Rest/binary>>) ->
+    {as_path, {as_sequence, parse_int_array(16, Rest)}};
+
+parse_update_pathattr(?BGP_PATHATTR_NEXT_HOP,
+		      <<A:8, B:8, C:8, D:8>>) ->
+
     {next_hop, (((256 * A + B) * 256 + C) * 256 + D)};
-%%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_MULTI_EXIT_DISC, Bin) ->
-    <<MED:32>> = Bin,
+
+parse_update_pathattr(?BGP_PATHATTR_MULTI_EXIT_DISC, <<MED:32>>) ->
     {multi_exit_disc, MED};
-%%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_LOCAL_PREF, Bin) ->
-    <<L:32>> = Bin,
-    {local_pref, L};
-%%
-%%
-%%
+
+parse_update_pathattr(?BGP_PATHATTR_LOCAL_PREF, <<LocalPref:32>>) ->
+    {local_pref, LocalPref};
+
 parse_update_pathattr(?BGP_PATHATTR_ATOMIC_AGGREGATE, _Bin) ->
     atomic_aggregate;
 
-%%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_AGGREGATOR, Bin) ->
-    <<AS:16, IP:32>> = Bin,
+parse_update_pathattr(?BGP_PATHATTR_AGGREGATOR, <<AS:16, IP:32>>) ->
     {aggregator, AS, IP};
 
-%%
-%%
-%% IPv6 Unicast Nexthop <nexthop> PoAttach Prefixlen <net>
-%% 0002      16      01                 00       128
 parse_update_pathattr(?BGP_PATHATTR_MP_REACH_NLRI,
-		      <<0,2,1,16,Addr:16/binary,0,Len,Net/binary>>) ->
+		      <<0,2,                % IPv6
+			1,                  % Unicast
+			16,                 % Nexthop length
+			Nexthop:16/binary,  % Nexthop
+			0,                  % Point of attachment
+			PrefixLen,          % Prefixlen
+			Net/binary          % Net. May be <PrefixLen bits
+		      >>) ->
     %% FIXME: canonicalize the address size
-    {nlri_ipv6, Addr, Net, Len};
+    {nlri_ipv6, Net, PrefixLen, Nexthop};
 
-%%
-%%
-%%
-parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<0>>) -> {origin, igp};
-parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<1>>) -> {origin, egp};
-parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<2>>) -> {origin, incomplete};
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<?ORIGIN_IGP>>) -> {origin, igp};
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<?ORIGIN_EGP>>) -> {origin, egp};
+parse_update_pathattr(?BGP_PATHATTR_ORIGIN, <<?ORIGIN_INCOMPLETE>>) ->
+    {origin, incomplete};
 
+%% Default catchall: Ignore attribute.
 parse_update_pathattr(PathAttr, Value) ->
     io:format("Unknown path attribute ~p = ~p~n", [PathAttr, Value]),
     {unknown, PathAttr, Value}.
 
+%%--------------------------------------------------------------------
+%% Function: parse_update_pathattrs(Data) -> [path_attribute, ...]
+%%
+%% Description:
+%% Given UPDATE path attributes as a binary return a list of parsed
+%% structures..
+%%--------------------------------------------------------------------
 parse_update_pathattrs(Data) ->
     parse_update_pathattrs(Data, []).
 
 parse_update_pathattrs(<<>>, Attrs) ->
     Attrs;
 
-parse_update_pathattrs(Pathattr, Attrs) ->
-    %%io:format('EGGPD_CONNECTION', ["pathattr parse: ~p", Pathattr]),
-    <<_F_Optional:1,
-      _F_Transitive:1,
-      _F_Partial:1,
-      _F_Extended:1,
-      _F_OtherFlags:4,
-      Code:8,
-      R1/binary>> = Pathattr,
+parse_update_pathattrs(<<_F_Optional:1,
+			 _F_Transitive:1,
+			 _F_Partial:1,
+			 _F_Extended:1,
+			 _F_OtherFlags:4,
+			 Code:8,
+			 R1/binary>>, Attrs) ->
     case _F_Extended of
 	0 ->
 	    <<Len:8, R2/binary>> = R1;
@@ -196,37 +233,41 @@ parse_update_pathattrs(Pathattr, Attrs) ->
     Parsed = parse_update_pathattr(Code, Value),
     parse_update_pathattrs(R3, [Parsed|Attrs]).
 
+%%--------------------------------------------------------------------
+%% Function: parse_update_info(Binary) -> [network, ...]
+%%
+%% Description:
+%% Parses a binary info or withdraw from an UPDATE message.
+%%--------------------------------------------------------------------
+parse_update_info(Bin) ->
+    parse_update_info(Bin, []).
 
-%%
-%%
-%%
-parse_update_info(<<>>) ->
-    [];
-parse_update_info(Info) ->
-    %io:format('EGGPD_CONNECTION', ["Update Info parse: ~p", Info]),
-    <<Len:8, R1/binary>> = Info,
+parse_update_info(<<>>, Info) ->
+    Info;
+
+parse_update_info(<<Len:8, R1/binary>>, Info) ->
     GLen = (8-(Len rem 8)) rem 8,
-    %io:format('EGGPD_CONNECTION', ["paaarse ~p ~p", Len, GLen]),
     <<Prefix1:Len,
-     _Garbage:GLen,
-     R2/binary>> = R1,
+      _Garbage:GLen,
+      R2/binary>> = R1,
     Prefix2 = Prefix1 bsl (32-Len),
-    [{Prefix2, Len}|parse_update_info(R2)].
+    parse_update_info(R2, [{Prefix2, Len}|Info]).
 
+%%--------------------------------------------------------------------
+%% Function: parse_update(Data) -> {update,
+%%                                     {withdraw, Withdraw,
+%%                                      pathattr, Pathattr,
+%%                                      info, Info}}
 %%
-%%
-%%
+%% Description:
+%% Parse an UPDATE message.
+%%--------------------------------------------------------------------
 parse_update(Msg) ->
     ?BGP_UPDATE_FMT = Msg,
-
-    %% Get withdraws
     ?BGP_UPDATE_FMT_WITHDRAW = _BGP_Update_Rest_Withdraw,
-
-    %% Get path attributes
     ?BGP_UPDATE_FMT_PATHATTR = _BGP_Update_Rest_Pathattr,
 
-    %% Parse the three field infos
-    Withdraw = parse_update_withdraw(_BGP_Update_Withdraw),
+    Withdraw = parse_update_info(_BGP_Update_Withdraw),
     Pathattr = parse_update_pathattrs(_BGP_Update_Pathattr),
     Info = parse_update_info(_BGP_Update_Info),
 
@@ -234,61 +275,65 @@ parse_update(Msg) ->
 	      pathattr, Pathattr,
 	      info, Info}}.
 
+%%--------------------------------------------------------------------
+%% Function: parse_all_msgs(Prent, Data, Peer) -> ignored
 %%
-%%
-%%
-parse_all_msgs(_Peerp, <<>>, _Peer) ->
-    ok;
+%% Description:
+%% Extract all complete messages from the buffer and send them off for
+%% parsing & handling. Leave any half-received data in the buffer.
+%%--------------------------------------------------------------------
+parse_all_msgs(_Parent, <<>>, _Peer) ->
+    void;
 
-parse_all_msgs(Peerp, Msg, Peer) ->
+parse_all_msgs(_Parent, Msg, _Peer) when size(Msg) < 19 ->
+    put(tcp_buffer, Msg);
+
+parse_all_msgs(Parent, Msg, Peer) ->
+    ?BGP_HEADER_FMT = Msg,
     if
-	size(Msg) < 19 ->
+	size(Msg) < _BGP_Head_Length ->
 	    put(tcp_buffer, Msg);
+		
 	true ->
-	    ?BGP_HEADER_FMT = Msg,
-	    if
-		size(Msg) < _BGP_Head_Length ->
-		    put(tcp_buffer, Msg);
-		
-		size(Msg) == _BGP_Head_Length ->
-		    parse_msg(Peerp, Msg, Peer);
-		
-		size(Msg) > _BGP_Head_Length ->
-		    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
-		    parse_msg(Peerp, Msg1, Peer),
-		    parse_all_msgs(Peerp, Msg2, Peer)
-	    end
+	    <<Msg1:_BGP_Head_Length/binary, Msg2/binary>> = Msg,
+	    parse_msg(Parent, _BGP_Head_Type, Msg1, Peer),
+	    parse_all_msgs(Parent, Msg2, Peer)
     end.
 
-parse_msg(Parent, Msg, Peer) ->
-    ?BGP_HEADER_FMT = Msg,
-    io:format("con(~p): about to send event to ~p~n", [self(), Parent]),
-    gen_fsm:send_event(Parent,
-		       case _BGP_Head_Type of
-			   ?BGP_TYPE_OPEN ->
-			       {open, parse_open(Msg, Peer)};
-			   ?BGP_TYPE_KEEPALIVE ->
-			       keepalive;
-			   ?BGP_TYPE_UPDATE ->
-			       parse_update(Msg);
-			   ?BGP_TYPE_NOTIFICATION ->
-			       {notification, Msg};
-			   Other ->
-			       io:format("con(~p): Unknown BGP msg type: ~p",
-					 [self(), Other]),
-			       {error, Other}
-		       end).
+%%--------------------------------------------------------------------
+%% Function: parse_msg(Parent, Msg, Peer) -> ok
+%%
+%% Description:
+%% Parse BGP messages and generate calls to Peer process.
+%%--------------------------------------------------------------------
+parse_msg(Parent, ?BGP_TYPE_OPEN, Msg, Peer) ->
+    gen_fsm:send_event(Parent, {open, parse_open(Msg, Peer)});
 
+parse_msg(Parent, ?BGP_TYPE_KEEPALIVE, _Msg, _Peer) ->
+    gen_fsm:send_event(Parent, keepalive);
+
+parse_msg(Parent, ?BGP_TYPE_UPDATE, Msg, _Peer) ->
+    gen_fsm:send_event(Parent, parse_update(Msg));
+
+parse_msg(Parent, ?BGP_TYPE_NOTIFICATION, Msg, _Peer) ->
+    gen_fsm:send_event(Parent, {notification, Msg}).
+
+%%--------------------------------------------------------------------
+%% Function: do_send_keepalive(Sock) -> ignored
 %%
-%%
-%%
+%% Description:
+%% Send simple KEEPALIVE.
+%%--------------------------------------------------------------------
 do_send_keepalive(Sock) ->
-    %%io:format("EGGPD_CONNECTION", ["Sending keepalive"]),
-    gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT),
-    {ack, 'Sent keepalive'}.
+    gen_tcp:send(Sock, ?BGP_KEEPALIVE_FMT).
 
+%%--------------------------------------------------------------------
+%% Function: do_send_open(Sock, peer) -> ignored
+%%
+%% Description:
+%% Generate and send OPEN.
+%%--------------------------------------------------------------------
 do_send_open(Sock, Peer) ->
-    %%io:format("EGGPD_CONNECTION", ["Sending OPEN... ~p", Sock]),
     _BGP_Length = 29,
     _BGP_AS = Peer#peer.localas,
     _BGP_Holdtime = 180,
@@ -296,31 +341,27 @@ do_send_open(Sock, Peer) ->
     _BGP_Opt_Parm_Len = 0,
     _BGP_Unused = 0,
     _BGP_Rest = <<>>,
-    Head = ?BGP_OPEN_FMT,
-    gen_tcp:send(Sock, Head),
-    {ack, 'Sent open'}.
+    gen_tcp:send(Sock, ?BGP_OPEN_FMT).
+
     
+%%--------------------------------------------------------------------
+%% Function: do_announce_route(Sock, Pathattr, Nets) -> ignored
+%%
+%% Description:
+%%--------------------------------------------------------------------
 do_announce_route(_Sock, _Path, []) ->
-    {ack, announced};
-do_announce_route(_Sock, Path, [R|Routes]) ->
-    do_announce_route(_Sock, Path, R),
-    do_announce_route(_Sock, Path, Routes);
+    void;
 
-do_announce_route(Sock, Path, Route) ->
-    %%io:format("Route: ~p ~p~n", [Path, Route]),
-
+do_announce_route(Sock, Path, [OneRoute|Routes]) ->
     %% Info
-    {Net,Plen} = Route,
+    {Net,Plen} = OneRoute,
     Tlen = Plen,
-    %%io:format("~p ~p ~n", [Net, Plen]),
     TNet = Net bsr (32-Plen),
     _BGP_Update_Info = <<Plen:8,TNet:Tlen>>,
-    %%io:format("Info: ~p~n", [_BGP_Update_Info]),
 
     %% Path attributes
     _BGP_Update_Pathattr = pathattr_factory(Path),
     _BGP_Update_Pathattrlen = size(_BGP_Update_Pathattr),
-    %%io:format("Pathattr: ~p~n", [_BGP_Update_Pathattr]),
     _BGP_Update_Rest_Pathattr = ?BGP_UPDATE_FMT_PATHATTR,
 
     %% Withdraw
@@ -333,15 +374,31 @@ do_announce_route(Sock, Path, Route) ->
 	+ 2 + _BGP_Update_Pathattrlen
 	+ size(_BGP_Update_Info),
     Update = ?BGP_UPDATE_FMT,
-    %%io:format("Packet: ~p~n", [Update]),
     gen_tcp:send(Sock, Update),
-    {ack, {announce, Route}}.
+    do_announce_route(Sock, Path, Routes).
 
+
+%%--------------------------------------------------------------------
+%% Function: array_to_binary(Size, Array) -> binary
+%%
+%% Description:
+%%--------------------------------------------------------------------
 array_to_binary(_Size, []) ->
     <<>>;
+
 array_to_binary(Size, [H|T]) ->
     R = array_to_binary(Size, T),
     <<H:Size, R/binary>>.
+
+%%--------------------------------------------------------------------
+%% Function: pathattr_factory(Pathattrs) -> binary
+%%
+%% Description:
+%% Convert pathattr structures to binary.
+%%
+%% TODO:
+%% * Convert huge case-statement to a more erlangy way.
+%%--------------------------------------------------------------------
 pathattr_factory([]) ->
     <<>>;
 pathattr_factory([{K,V}|Pathattrs]) ->
@@ -408,59 +465,60 @@ announce_route(Con, Path, Route) ->
     Con ! {self(), {announce, Path, Route}}.
 
 %%
-%%
+%% Ugly state and message loop below. Should be rewritten with generic
+%% behaviour.
 %%
 state_idle(Parent, Peer) ->
     io:format("con(~p): state_idle/2~n", [self()]),
     enter_state_idle(false, Parent, Peer).
 
-enter_state_idle(LSock, Peerp, Peer) ->
+enter_state_idle(LSock, Parent, Peer) ->
     io:format("con(~p): entering idle~n", [self()]),
     io:format("con(~p): state_idle~n", [self()]),
-    state_idle(LSock, Peerp, Peer).
+    state_idle(LSock, Parent, Peer).
 
-state_idle(LSock, Peerp, Peer) ->
-    io:format("con(~p): idle(~p, ~p, ~p)~n", [self(), LSock, Peerp, Peer]),
+state_idle(LSock, Parent, Peer) ->
+    io:format("con(~p): idle(~p, ~p, ~p)~n", [self(), LSock, Parent, Peer]),
     receive
-	{Peerp, stop} ->
+	{Parent, stop} ->
 	    exit(killed);
 
-	{Peerp, connect} ->
+	{Parent, connect} ->
 	    R = gen_tcp:connect(Peer#peer.ip,
 				Peer#peer.port,
 				[binary, {packet, 0}],
 				1000),
 	    case R of
 		{ok, Sock} ->
-		    enter_state_connected(LSock, Sock, Peerp, Peer);
+		    enter_state_connected(LSock, Sock, Parent, Peer);
 		Any ->
 		    io:format("con(~p): connect() failed: ~p~n",
 			      [self(), Any]),
-		    Peerp ! {self(), {error, {connect, timeout}}},
-		    state_idle(LSock, Peerp, Peer)
+		    Parent ! {self(), {error, {connect, timeout}}},
+		    ?MODULE:state_idle(LSock, Parent, Peer)
 	    end;
 
-	{Peerp, listen} ->
+	{Parent, listen} ->
 	    LS = gen_tcp:listen(Peer#peer.localport,
 				[binary]),
 	    case LS of
 		{ok, LS1} ->
-		    state_idle(LS1, Peerp, Peer);
+		    ?MODULE:state_idle(LS1, Parent, Peer);
 		Any ->
 		    io:format("con(~p): listen() failed: ~p~n", [self(), Any]),
-		    state_idle(LSock, Peerp, Peer)
+		    state_idle(LSock, Parent, Peer)
 	    end
     after 1000 ->
 	    case LSock of
 		false ->
-		    state_idle(LSock, Peerp, Peer);
+		    ?MODULE:state_idle(LSock, Parent, Peer);
 		_ ->
 		    R = gen_tcp:accept(LSock, 0),
 		    case R of
 			{ok, Sock} ->
-			    enter_state_connected(LSock, Sock, Peerp, Peer);
+			    enter_state_connected(LSock, Sock, Parent, Peer);
 			_ ->
-			    ?MODULE:state_idle(LSock, Peerp, Peer)
+			    ?MODULE:state_idle(LSock, Parent, Peer)
 		    end
 	    end
     end.
@@ -472,46 +530,41 @@ enter_state_connected(LSock, Sock, Parent, Peer) ->
     put(tcp_buffer, <<>>),
     state_connected(LSock, Sock, Parent, Peer).
 
-state_connected(LSock, Sock, Peerp, Peer) ->
+state_connected(LSock, Sock, Parent, Peer) ->
     receive
-	%% From Peerp
-	{Peerp, stop} ->
+	%% From Parent
+	{Parent, stop} ->
 	    exit(killed);
 
-	{Peerp, open} ->
+	{Parent, open} ->
 	    io:format("con(~p): Sending open~n", [self()]),
 	    do_send_open(Sock, Peer),
-	    state_connected(LSock, Sock, Peerp, Peer);
+	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
-	{Peerp, keepalive} ->
+	{Parent, keepalive} ->
 	    io:format("con(~p): Sending keepalive~n", [self()]),
 	    do_send_keepalive(Sock),
-	    state_connected(LSock, Sock, Peerp, Peer);
+	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
-	{Peerp, {announce, Path, Route}} ->
+	{Parent, {announce, Path, Route}} ->
 	    do_announce_route(Sock, Path, Route),
-	    state_connected(LSock, Sock, Peerp, Peer);
+	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
-	{Peerp, {withdraw, _Route}} ->
+	{Parent, {withdraw, _Route}} ->
 	    %% FIXME
-	    state_connected(LSock, Sock, Peerp, Peer);
+	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
 	%% From socket
 	{tcp, Sock, Msg} ->
 	    Msg1 = list_to_binary([get(tcp_buffer), Msg]),
 	    put(tcp_buffer, <<>>),
-	    parse_all_msgs(Peerp, Msg1, Peer),
-	    state_connected(LSock, Sock, Peerp, Peer);
+	    parse_all_msgs(Parent, Msg1, Peer),
+	    ?MODULE:state_connected(LSock, Sock, Parent, Peer);
 
 	{tcp_closed, Sock} ->
-	    Peerp ! {self(), {error, {tcp_closed, Sock}}},
+	    Parent ! {self(), {error, {tcp_closed, Sock}}},
 	    gen_tcp:close(Sock),
-	    state_idle(LSock, Peerp, Peer);
-	    
-	Any ->
-	    io:format("con(~p): state_connected got bogus msg ~p~n",
-		      [self(), Any]),
-	    state_connected(LSock, Sock, Peerp, Peer)
+	    ?MODULE:state_idle(LSock, Parent, Peer)
     end.
 
 start_link(Peer) ->

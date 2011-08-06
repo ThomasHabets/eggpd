@@ -110,6 +110,18 @@
 	<<
 	 _BGP_Update_Pathattr:_BGP_Update_Pathattrlen/binary,
 	 _BGP_Update_Info/binary>>).
+
+-define(AS_SET, 1).
+-define(AS_SEQUENCE, 2).
+
+-define(CAP_MP_EXT, 1).
+-define(CAP_ROUTE_REFRESH, 2).
+-define(CAP_32BIT_AS, 65).
+-define(CAP_ROUTE_REFRESH_128, 128).
+
+-define(ORIGIN_IGP, 0).
+-define(ORIGIN_EGP, 1).
+-define(ORIGIN_INCOMPLETE, 2).
  
 %% Update - Path attributes
 -define(BGP_PATHATTR_ORIGIN, 1).
